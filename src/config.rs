@@ -17,6 +17,11 @@ pub struct HarnessConfig {
     pub name: String,
     pub log_path: PathBuf,
     pub log_format: LogFormat,
+    /// Optional Bound filter (e.g. "[.json]"). When `log_format` is `Bound`,
+    /// this filter is passed to the `bound` binary. If omitted, Bound scans
+    /// every non-hidden file in `log_path`.
+    #[serde(default)]
+    pub bound_filter: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -25,6 +30,7 @@ pub enum LogFormat {
     Markdown,
     Plain,
     CodexSqlite,
+    Bound,
     Custom(String),
 }
 
@@ -95,6 +101,7 @@ impl DreamseqConfig {
                 name: name.to_string(),
                 log_path,
                 log_format,
+                bound_filter: None,
             })
             .collect()
     }

@@ -322,6 +322,7 @@ async fn aggregator_accepts_json_arrays() {
             name: "test".into(),
             log_path: PathBuf::from(&root),
             log_format: dreamseq::config::LogFormat::Json,
+            bound_filter: None,
         }])
         .await
         .unwrap();
@@ -343,6 +344,7 @@ async fn aggregator_accepts_json_lines() {
             name: "test".into(),
             log_path: PathBuf::from(&root),
             log_format: dreamseq::config::LogFormat::Json,
+            bound_filter: None,
         }])
         .await
         .unwrap();
@@ -364,6 +366,7 @@ async fn aggregator_parses_markdown_lines() {
             name: "md".into(),
             log_path: PathBuf::from(&root),
             log_format: dreamseq::config::LogFormat::Markdown,
+            bound_filter: None,
         }])
         .await
         .unwrap();
@@ -387,6 +390,7 @@ async fn aggregator_parses_json_tool_calls() {
             name: "test".into(),
             log_path: PathBuf::from(&root),
             log_format: dreamseq::config::LogFormat::Json,
+            bound_filter: None,
         }])
         .await
         .unwrap();
@@ -415,6 +419,7 @@ async fn aggregator_parses_numeric_timestamp_seconds() {
             name: "test".into(),
             log_path: PathBuf::from(&root),
             log_format: dreamseq::config::LogFormat::Json,
+            bound_filter: None,
         }])
         .await
         .unwrap();
@@ -438,6 +443,7 @@ async fn aggregator_extracts_timestamp_from_plain_lines() {
             name: "plain".into(),
             log_path: PathBuf::from(&root),
             log_format: dreamseq::config::LogFormat::Plain,
+            bound_filter: None,
         }])
         .await
         .unwrap();
@@ -458,6 +464,7 @@ async fn aggregator_parses_plain_lines() {
             name: "plain".into(),
             log_path: PathBuf::from(&root),
             log_format: dreamseq::config::LogFormat::Plain,
+            bound_filter: None,
         }])
         .await
         .unwrap();
@@ -552,4 +559,83 @@ async fn full_pipeline_runs_without_api_key_when_no_logs() {
 
     fs::remove_dir_all(&anthology.config.anthologies_dir).ok();
     fs::remove_dir_all(&anthology.config.output_dir).ok();
+}
+
+fn bound_available() -> bool {
+    std::process::Command::new("bound")
+        .arg("--version")
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
+#[tokio::test]
+async fn bound_aggregates_files_as_log_entries() {
+    if !bound_available() {
+        return;
+    }
+
+    let root = std::env::temp_dir().join(format!("dreamseq-bound-{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("a.txt"), "first bound entry").unwrap();
+    fs::write(root.join("b.txt"), "second bound entry").unwrap();
+
+    let entries = dreamseq::LogAggregator::new()
+        .aggregate(&[HarnessConfig {
+            name: "bound".into(),
+            log_path: PathBuf::from(&root),
+            log_format: dreamseq::config::LogFormat::Bound,
+            bound_filter: None,
+        }])
+        .await
+        .unwrap();
+
+    assert_eq!(entries.len(), 2);
+    assert!(
+        entries
+            .iter()
+            .any(|e| e.content.contains("first bound entry"))
+    );
+    assert!(
+        entries
+            .iter()
+            .any(|e| e.content.contains("second bound entry"))
+    );
+    assert!(entries.iter().all(|e| {
+        e.metadata
+            .provider
+            .as_ref()
+            .map(|p| p.starts_with("bound:"))
+            .unwrap_or(false)
+    }));
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn bound_filter_limits_scanned_files() {
+    if !bound_available() {
+        return;
+    }
+
+    let root = std::env::temp_dir().join(format!("dreamseq-bound-filter-{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("keep.json"), r#"{"msg":"json log"}"#).unwrap();
+    fs::write(root.join("ignore.txt"), "plain log").unwrap();
+
+    let entries = dreamseq::LogAggregator::new()
+        .aggregate(&[HarnessConfig {
+            name: "bound".into(),
+            log_path: PathBuf::from(&root),
+            log_format: dreamseq::config::LogFormat::Bound,
+            bound_filter: Some("[.json]".to_string()),
+        }])
+        .await
+        .unwrap();
+
+    assert_eq!(entries.len(), 1);
+    assert!(entries[0].content.contains("json log"));
+    assert!(!entries[0].content.contains("plain log"));
+
+    fs::remove_dir_all(root).unwrap();
 }

@@ -99,6 +99,12 @@ Dreamseq uses a JSON configuration file at `~/.config/dreamseq/config.json` (leg
       "name": "claude",
       "log_path": "/path/to/claude/logs",
       "log_format": "markdown"
+    },
+    {
+      "name": "project-snapshots",
+      "log_path": "/path/to/project",
+      "log_format": "bound",
+      "bound_filter": "[.rs]"
     }
   ],
   "output_dir": "/home/user/dreamseq/output",
@@ -113,8 +119,9 @@ Dreamseq uses a JSON configuration file at `~/.config/dreamseq/config.json` (leg
 - `groq_api_key`: API key for Groq (required for analysis)
 - `harnesses`: Array of harness configurations
   - `name`: Identifier for the harness
-  - `log_path`: Path to log files
-  - `log_format`: Format of logs (`json`, `markdown`, `plain`, or `custom`)
+  - `log_path`: Path to log files or project snapshots
+  - `log_format`: Format of logs (`json`, `markdown`, `plain`, `codex_sqlite`, `bound`, or `custom`)
+  - `bound_filter`: Optional Bound filter (e.g. `[.rs]`) when `log_format` is `bound`
 - `output_dir`: Directory for temporary output files
 - `anthologies_dir`: Directory for generated anthologies
 - `enable_tts`: Enable text-to-speech notifications
@@ -264,7 +271,7 @@ cargo clippy
 - Added MIT `LICENSE` and GitHub Actions CI workflow.
 - Corrected normalization duplicate/empty entry accounting.
 - Steering detector now compiles regexes once and uses tighter patterns to avoid false positives on telemetry noise.
-- Expanded test coverage from 13 to 25 tests, replacing tautological assertions with real checks and adding a mocked Groq endpoint test.
+- Expanded test coverage from 13 to 29 tests, replacing tautological assertions with real checks and adding a mocked Groq endpoint test.
 - Removed unused `config` and `thiserror` dependencies.
 - Improved log parsing:
   - JSON logs now extract `tool_calls`, `model`, and numeric or string timestamps.
@@ -272,10 +279,10 @@ cargo clippy
   - Codex SQLite sources are skipped gracefully when `sqlite3` is unavailable.
 - Improved segmentation: topic similarity now ignores common stopwords and strips punctuation.
 - Added an end-to-end pipeline test that runs the full flow without a Groq API key when no logs are present.
+- Integrated [Bound](https://github.com/sal/bound) as a first-class log source via the `bound` `log_format` and optional `bound_filter`.
 
 ### Up next
 - Replace heuristic segmentation (Jaccard + time gap) with an embedding-based or topic-model approach.
-- Add real Bound integration rather than direct file scanning.
 - Add harness-specific structured parsers (e.g., OpenAI Codex JSONL, Kimi session logs).
 - Add deterministic end-to-end integration tests with fixture data.
 

@@ -66,13 +66,16 @@ impl LogAggregator {
     }
 
     async fn aggregate_harness(&self, harness: &HarnessConfig) -> Result<Vec<LogEntry>> {
-        let mut entries = Vec::new();
-
         if !harness.log_path.exists() {
             tracing::warn!("Log path does not exist: {:?}", harness.log_path);
-            return Ok(entries);
+            return Ok(Vec::new());
         }
 
+        if matches!(harness.log_format, crate::config::LogFormat::Bound) {
+            return crate::bound::aggregate_bound_harness(harness).await;
+        }
+
+        let mut entries = Vec::new();
         for entry in WalkDir::new(&harness.log_path)
             .follow_links(true)
             .into_iter()
@@ -100,6 +103,9 @@ impl LogAggregator {
                     }
                     crate::config::LogFormat::Plain | crate::config::LogFormat::Custom(_) => {
                         self.parse_plain_logs(&content, &harness.name)
+                    }
+                    crate::config::LogFormat::Bound => {
+                        unreachable!("Bound harnesses are handled directly in aggregate_harness")
                     }
                     crate::config::LogFormat::CodexSqlite => unreachable!(),
                 }
