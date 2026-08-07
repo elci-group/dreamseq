@@ -1,0 +1,21 @@
+# Rust build artifacts
+/target
+
+# Dreamseq runtime outputs
+/anthologies
+/output
+/.dreams
+
+# kaptaind runtime state
+/.kaptaind
+
+# IDE / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Local/runtime metadata
+.toon
