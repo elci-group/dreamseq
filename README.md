@@ -260,7 +260,8 @@ cargo clippy
 ## Roadmap
 
 ### Recently completed
-- Source-control hygiene (`.gitignore`, ignored runtime artifacts).
+- Source-control hygiene (`.gitignore`, initial commit, ignored runtime artifacts).
+- Added MIT `LICENSE` and GitHub Actions CI workflow.
 - Corrected normalization duplicate/empty entry accounting.
 - Steering detector now compiles regexes once and uses tighter patterns to avoid false positives on telemetry noise.
 - Expanded test coverage from 13 to 25 tests, replacing tautological assertions with real checks and adding a mocked Groq endpoint test.
@@ -275,15 +276,14 @@ cargo clippy
 - Add real Bound integration rather than direct file scanning.
 - Add harness-specific structured parsers (e.g., OpenAI Codex JSONL, Kimi session logs).
 - Add deterministic end-to-end integration tests with fixture data.
-- Set up CI (GitHub Actions) and pick a license before public release.
 
 ## License
 
-License TBD — to be chosen before the first public release.
+This project is licensed under the [MIT License](LICENSE).
 
 ## Contributing
 
-Contributing guidelines TBD — open an issue or PR to discuss changes before the first public release.
+Contributions are welcome. Please open an issue or pull request to discuss non-trivial changes before submitting code.
 
 ## Acknowledgments
 
