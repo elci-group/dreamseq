@@ -2,7 +2,8 @@ use crate::aggregator::LogEntry;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::sync::LazyLock;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Segment {
@@ -13,6 +14,19 @@ pub struct Segment {
     pub end_time: DateTime<Utc>,
     pub confidence: f64,
 }
+
+static STOPWORDS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
+    [
+        "the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "by",
+        "from", "as", "is", "was", "are", "this", "that", "it", "i", "you", "we", "he", "she",
+        "they", "be", "been", "have", "has", "had", "do", "does", "did", "will", "would", "could",
+        "should", "may", "might", "can", "not", "no", "yes", "ok", "so", "if", "then", "than",
+        "when", "where", "what", "how", "why", "who", "which", "there", "here",
+    ]
+    .iter()
+    .copied()
+    .collect()
+});
 
 pub struct SemanticSegmenter;
 
@@ -88,18 +102,8 @@ impl SemanticSegmenter {
     }
 
     fn topic_similarity(&self, entry1: &LogEntry, entry2: &LogEntry) -> f64 {
-        // Simple similarity based on shared keywords
-        let words1: HashSet<String> = entry1
-            .content
-            .split_whitespace()
-            .map(|w| w.to_lowercase())
-            .collect();
-
-        let words2: HashSet<String> = entry2
-            .content
-            .split_whitespace()
-            .map(|w| w.to_lowercase())
-            .collect();
+        let words1 = meaningful_words(&entry1.content);
+        let words2 = meaningful_words(&entry2.content);
 
         if words1.is_empty() || words2.is_empty() {
             return 0.0;
@@ -112,12 +116,10 @@ impl SemanticSegmenter {
     }
 
     fn infer_topic(&self, entries: &[LogEntry]) -> String {
-        // Extract most common keywords as topic
         let mut word_counts: HashMap<String, usize> = HashMap::new();
 
         for entry in entries {
-            for word in entry.content.split_whitespace() {
-                let word = word.to_lowercase();
+            for word in meaningful_words(&entry.content) {
                 if word.len() > 3 {
                     // Ignore short words
                     *word_counts.entry(word).or_insert(0) += 1;
@@ -148,4 +150,13 @@ impl SemanticSegmenter {
     }
 }
 
-use std::collections::HashSet;
+fn meaningful_words(content: &str) -> HashSet<String> {
+    content
+        .split_whitespace()
+        .map(|word| {
+            word.trim_matches(|c: char| !c.is_alphanumeric())
+                .to_lowercase()
+        })
+        .filter(|word| !word.is_empty() && !STOPWORDS.contains(word.as_str()))
+        .collect()
+}

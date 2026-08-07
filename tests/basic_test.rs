@@ -1,4 +1,4 @@
-use chrono::Utc;
+use chrono::{DateTime, Duration, Utc};
 use dreamseq::DreamseqConfig;
 use dreamseq::aggregator::{LogEntry, LogMetadata};
 use dreamseq::config::HarnessConfig;
@@ -10,10 +10,14 @@ use std::fs;
 use std::path::PathBuf;
 
 fn log_entry(content: &str) -> LogEntry {
+    log_entry_with_ts(content, Utc::now())
+}
+
+fn log_entry_with_ts(content: &str, timestamp: DateTime<Utc>) -> LogEntry {
     LogEntry {
         id: content.to_string(),
         harness: "test".to_string(),
-        timestamp: Utc::now(),
+        timestamp,
         content: content.to_string(),
         metadata: LogMetadata {
             model: None,
@@ -498,4 +502,54 @@ fn segmentation_splits_on_time_gap() {
 
     let segments = SemanticSegmenter::new().segment(entries).unwrap();
     assert_eq!(segments.len(), 2);
+}
+
+#[test]
+fn segmentation_groups_by_shared_keywords() {
+    use dreamseq::segmentation::SemanticSegmenter;
+
+    let now = Utc::now();
+    let entries = vec![
+        log_entry_with_ts("debug the rust build", now),
+        log_entry_with_ts("the rust build failed", now + Duration::seconds(10)),
+        log_entry_with_ts(
+            "completely unrelated topic here",
+            now + Duration::seconds(20),
+        ),
+    ];
+
+    let segments = SemanticSegmenter::new().segment(entries).unwrap();
+    assert_eq!(segments.len(), 2);
+    let topic = &segments[0].topic;
+    assert!(
+        topic.contains("build") || topic.contains("rust") || topic.contains("failing"),
+        "expected topic to reflect shared keywords, got {}",
+        topic
+    );
+}
+
+#[tokio::test]
+async fn full_pipeline_runs_without_api_key_when_no_logs() {
+    use dreamseq::{Dreamseq, DreamseqConfig};
+
+    let mut config = DreamseqConfig::default();
+    config.groq_api_key.clear();
+    config.harnesses.clear();
+    config.anthologies_dir =
+        std::env::temp_dir().join(format!("dreamseq-anthologies-{}", uuid::Uuid::new_v4()));
+    config.output_dir =
+        std::env::temp_dir().join(format!("dreamseq-output-{}", uuid::Uuid::new_v4()));
+
+    let dreamseq = Dreamseq::new(config).unwrap();
+    let anthology = dreamseq.run().await.unwrap();
+
+    assert_eq!(anthology.pipeline.raw_entries, 0);
+    assert_eq!(anthology.pipeline.normalized_entries, 0);
+    assert_eq!(anthology.pipeline.segments, 0);
+    assert!(anthology.patterns.is_empty());
+    assert!(anthology.steering_events.is_empty());
+    assert!(anthology.save().is_ok());
+
+    fs::remove_dir_all(&anthology.config.anthologies_dir).ok();
+    fs::remove_dir_all(&anthology.config.output_dir).ok();
 }

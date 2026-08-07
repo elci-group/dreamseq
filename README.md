@@ -270,6 +270,8 @@ cargo clippy
   - JSON logs now extract `tool_calls`, `model`, and numeric or string timestamps.
   - Plain and Markdown parsers extract inline timestamps and skip headings/empty lines.
   - Codex SQLite sources are skipped gracefully when `sqlite3` is unavailable.
+- Improved segmentation: topic similarity now ignores common stopwords and strips punctuation.
+- Added an end-to-end pipeline test that runs the full flow without a Groq API key when no logs are present.
 
 ### Up next
 - Replace heuristic segmentation (Jaccard + time gap) with an embedding-based or topic-model approach.
