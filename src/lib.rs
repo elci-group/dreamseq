@@ -38,7 +38,11 @@ pub struct Dreamseq {
 
 impl Dreamseq {
     pub fn new(config: DreamseqConfig) -> Result<Self> {
-        let groq_client = GroqClient::new(&config.groq_api_key)?;
+        let groq_client = if let Some(base_url) = &config.groq_base_url {
+            GroqClient::new_with_url(&config.groq_api_key, base_url)?
+        } else {
+            GroqClient::new(&config.groq_api_key)?
+        };
         let anthologies_dir = config.anthologies_dir.clone();
 
         let kaptaind_monitor = if config.enable_kaptaind {

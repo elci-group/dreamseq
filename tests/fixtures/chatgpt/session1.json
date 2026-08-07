@@ -1,0 +1,17 @@
+[
+  {
+    "timestamp": "2026-08-07T09:00:00Z",
+    "content": "I wish I had a tool for this",
+    "model": "gpt-4"
+  },
+  {
+    "timestamp": "2026-08-07T09:05:00Z",
+    "content": "run the test again",
+    "model": "gpt-4"
+  },
+  {
+    "timestamp": "2026-08-07T09:10:00Z",
+    "content": "debug the rust build",
+    "model": "gpt-4"
+  }
+]

@@ -10,6 +10,10 @@ pub struct DreamseqConfig {
     pub anthologies_dir: PathBuf,
     pub enable_tts: bool,
     pub enable_kaptaind: bool,
+    /// Optional override for the Groq API base URL. Useful for testing against
+    /// a local mock server.
+    #[serde(default)]
+    pub groq_base_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -148,6 +152,7 @@ impl Default for DreamseqConfig {
             anthologies_dir: home.join("dreamseq").join("anthologies"),
             enable_tts: false,
             enable_kaptaind: true,
+            groq_base_url: None,
         }
     }
 }

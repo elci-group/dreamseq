@@ -561,6 +561,102 @@ async fn full_pipeline_runs_without_api_key_when_no_logs() {
     fs::remove_dir_all(&anthology.config.output_dir).ok();
 }
 
+#[tokio::test]
+async fn full_pipeline_with_fixture_data() {
+    use dreamseq::{Dreamseq, DreamseqConfig};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let fixtures = manifest_dir.join("tests").join("fixtures");
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let analysis = serde_json::json!({
+        "model_failures": [{"model": "gpt-4", "issue": "hallucinated API", "frequency": 2, "example": "foo()"}],
+        "harness_friction": [{"harness": "chatgpt", "issue": "slow responses", "severity": 0.7}],
+        "missing_tooling": [{"tool_name": "test-runner", "purpose": "rerun failed tests", "estimated_value": 0.8}],
+        "workflow_bottlenecks": [{"description": "repeated builds", "frequency": 3, "time_impact_minutes": 15.0}],
+        "repeated_commands": [{"command": "cargo test", "frequency": 3, "context": "rust build"}],
+        "repeated_prompts": [],
+        "context_loss": [],
+        "automation_opportunities": [{"description": "automate test rerun", "estimated_time_saved": 10.0, "confidence": 0.9}]
+    });
+    let analysis_text = serde_json::to_string(&analysis).unwrap();
+    let body = serde_json::json!({
+        "choices": [{"message": {"content": analysis_text}}],
+        "usage": {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150}
+    });
+    let body_bytes = body.to_string();
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+        body_bytes.len(),
+        body_bytes
+    );
+
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut buf = [0u8; 32768];
+        let _ = socket.read(&mut buf).await.unwrap();
+        socket.write_all(response.as_bytes()).await.unwrap();
+    });
+
+    let mut config = DreamseqConfig::default();
+    config.groq_api_key = "test-key".to_string();
+    config.groq_base_url = Some(format!("http://{}", addr));
+    config.enable_kaptaind = false;
+    config.harnesses = vec![
+        HarnessConfig {
+            name: "chatgpt".into(),
+            log_path: fixtures.join("chatgpt"),
+            log_format: dreamseq::config::LogFormat::Json,
+            bound_filter: None,
+        },
+        HarnessConfig {
+            name: "kimi".into(),
+            log_path: fixtures.join("kimi"),
+            log_format: dreamseq::config::LogFormat::Plain,
+            bound_filter: None,
+        },
+        HarnessConfig {
+            name: "claude".into(),
+            log_path: fixtures.join("claude"),
+            log_format: dreamseq::config::LogFormat::Markdown,
+            bound_filter: None,
+        },
+    ];
+    config.anthologies_dir = std::env::temp_dir().join(format!(
+        "dreamseq-fixture-anthologies-{}",
+        uuid::Uuid::new_v4()
+    ));
+    config.output_dir =
+        std::env::temp_dir().join(format!("dreamseq-fixture-output-{}", uuid::Uuid::new_v4()));
+
+    let dreamseq = Dreamseq::new(config).unwrap();
+    let mut anthology = dreamseq.run().await.unwrap();
+
+    assert!(
+        anthology.pipeline.raw_entries >= 8,
+        "expected at least 8 raw entries, got {}",
+        anthology.pipeline.raw_entries
+    );
+    assert!(anthology.pipeline.normalized_entries > 0);
+    assert!(anthology.pipeline.segments > 0);
+    assert!(!anthology.patterns.is_empty());
+    assert!(!anthology.steering_events.is_empty());
+    assert!(anthology.save().is_ok());
+
+    anthology.generate().unwrap();
+    assert!(!anthology.generate_directives().is_empty());
+
+    server.abort();
+    let _ = server.await;
+
+    fs::remove_dir_all(&anthology.config.anthologies_dir).ok();
+    fs::remove_dir_all(&anthology.config.output_dir).ok();
+}
+
 fn bound_available() -> bool {
     std::process::Command::new("bound")
         .arg("--version")

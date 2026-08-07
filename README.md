@@ -271,7 +271,8 @@ cargo clippy
 - Added MIT `LICENSE` and GitHub Actions CI workflow.
 - Corrected normalization duplicate/empty entry accounting.
 - Steering detector now compiles regexes once and uses tighter patterns to avoid false positives on telemetry noise.
-- Expanded test coverage from 13 to 29 tests, replacing tautological assertions with real checks and adding a mocked Groq endpoint test.
+- Expanded test coverage from 13 to 30 tests, replacing tautological assertions with real checks and adding a mocked Groq endpoint test.
+- Added deterministic end-to-end integration test using fixture log data and a local mock Groq server.
 - Removed unused `config` and `thiserror` dependencies.
 - Improved log parsing:
   - JSON logs now extract `tool_calls`, `model`, and numeric or string timestamps.
@@ -284,7 +285,6 @@ cargo clippy
 ### Up next
 - Replace heuristic segmentation (Jaccard + time gap) with an embedding-based or topic-model approach.
 - Add harness-specific structured parsers (e.g., OpenAI Codex JSONL, Kimi session logs).
-- Add deterministic end-to-end integration tests with fixture data.
 
 ## License
 
