@@ -28,6 +28,10 @@ static STOPWORDS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
     .collect()
 });
 
+/// Two entries must be at least this similar (cosine over TF-IDF vectors) to
+/// stay in the same segment.
+const SIMILARITY_THRESHOLD: f64 = 0.3;
+
 pub struct SemanticSegmenter;
 
 impl Default for SemanticSegmenter {
@@ -46,7 +50,8 @@ impl SemanticSegmenter {
             return Ok(vec![]);
         }
 
-        // Group entries by time proximity and topic similarity
+        let vectors = tfidf_vectors(&entries);
+
         let mut segments = Vec::new();
         let mut current_segment: Vec<LogEntry> = vec![entries[0].clone()];
 
@@ -54,15 +59,13 @@ impl SemanticSegmenter {
             let prev = &entries[i - 1];
             let current = &entries[i];
 
-            // Check if this should start a new segment
             let time_gap = current
                 .timestamp
                 .signed_duration_since(prev.timestamp)
                 .num_minutes();
-            let topic_similarity = self.topic_similarity(prev, current);
+            let topic_similarity = cosine_similarity(&vectors[i - 1], &vectors[i]);
 
-            if time_gap > 30 || topic_similarity < 0.5 {
-                // End current segment
+            if time_gap > 30 || topic_similarity < SIMILARITY_THRESHOLD {
                 if !current_segment.is_empty() {
                     segments.push(self.create_segment(current_segment.clone())?);
                 }
@@ -72,7 +75,6 @@ impl SemanticSegmenter {
             }
         }
 
-        // Don't forget the last segment
         if !current_segment.is_empty() {
             segments.push(self.create_segment(current_segment)?);
         }
@@ -101,27 +103,12 @@ impl SemanticSegmenter {
         })
     }
 
-    fn topic_similarity(&self, entry1: &LogEntry, entry2: &LogEntry) -> f64 {
-        let words1 = meaningful_words(&entry1.content);
-        let words2 = meaningful_words(&entry2.content);
-
-        if words1.is_empty() || words2.is_empty() {
-            return 0.0;
-        }
-
-        let intersection = words1.intersection(&words2).count();
-        let union = words1.union(&words2).count();
-
-        intersection as f64 / union as f64
-    }
-
     fn infer_topic(&self, entries: &[LogEntry]) -> String {
         let mut word_counts: HashMap<String, usize> = HashMap::new();
 
         for entry in entries {
             for word in meaningful_words(&entry.content) {
                 if word.len() > 3 {
-                    // Ignore short words
                     *word_counts.entry(word).or_insert(0) += 1;
                 }
             }
@@ -135,18 +122,17 @@ impl SemanticSegmenter {
     }
 
     fn calculate_confidence(&self, entries: &[LogEntry]) -> f64 {
-        // Confidence based on segment coherence
         if entries.len() < 2 {
             return 1.0;
         }
 
+        let vectors = tfidf_vectors(entries);
         let mut similarities = Vec::new();
         for i in 0..entries.len() - 1 {
-            similarities.push(self.topic_similarity(&entries[i], &entries[i + 1]));
+            similarities.push(cosine_similarity(&vectors[i], &vectors[i + 1]));
         }
 
-        let avg_similarity: f64 = similarities.iter().sum::<f64>() / similarities.len() as f64;
-        avg_similarity
+        similarities.iter().sum::<f64>() / similarities.len() as f64
     }
 }
 
@@ -159,4 +145,81 @@ fn meaningful_words(content: &str) -> HashSet<String> {
         })
         .filter(|word| !word.is_empty() && !STOPWORDS.contains(word.as_str()))
         .collect()
+}
+
+fn term_frequencies(content: &str) -> HashMap<String, f64> {
+    let words: Vec<String> = content
+        .split_whitespace()
+        .map(|word| {
+            word.trim_matches(|c: char| !c.is_alphanumeric())
+                .to_lowercase()
+        })
+        .filter(|word| !word.is_empty() && !STOPWORDS.contains(word.as_str()))
+        .collect();
+
+    let total = words.len().max(1) as f64;
+    let mut counts: HashMap<String, f64> = HashMap::new();
+    for word in words {
+        *counts.entry(word).or_insert(0.0) += 1.0;
+    }
+    for count in counts.values_mut() {
+        *count /= total;
+    }
+    counts
+}
+
+fn tfidf_vectors(entries: &[LogEntry]) -> Vec<HashMap<String, f64>> {
+    let term_frequencies: Vec<HashMap<String, f64>> = entries
+        .iter()
+        .map(|entry| term_frequencies(&entry.content))
+        .collect();
+
+    let mut document_frequency: HashMap<String, usize> = HashMap::new();
+    for tf in &term_frequencies {
+        for term in tf.keys() {
+            *document_frequency.entry(term.clone()).or_insert(0) += 1;
+        }
+    }
+
+    let n = entries.len() as f64;
+    let mut vectors = Vec::with_capacity(entries.len());
+    for tf in term_frequencies {
+        let mut vector = HashMap::new();
+        for (term, frequency) in tf {
+            let df = *document_frequency.get(&term).unwrap_or(&1) as f64;
+            let idf = ((n / df) + 1.0).ln();
+            vector.insert(term, frequency * idf);
+        }
+        vectors.push(vector);
+    }
+
+    vectors
+}
+
+fn cosine_similarity(a: &HashMap<String, f64>, b: &HashMap<String, f64>) -> f64 {
+    if a.is_empty() || b.is_empty() {
+        return 0.0;
+    }
+
+    let mut dot_product = 0.0;
+    let mut norm_a = 0.0;
+    let mut norm_b = 0.0;
+
+    for (term, weight) in a {
+        norm_a += weight * weight;
+        if let Some(other_weight) = b.get(term) {
+            dot_product += weight * other_weight;
+        }
+    }
+
+    for weight in b.values() {
+        norm_b += weight * weight;
+    }
+
+    let denominator = norm_a.sqrt() * norm_b.sqrt();
+    if denominator == 0.0 {
+        return 0.0;
+    }
+
+    dot_product / denominator
 }

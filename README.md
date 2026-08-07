@@ -278,12 +278,12 @@ cargo clippy
   - JSON logs now extract `tool_calls`, `model`, and numeric or string timestamps.
   - Plain and Markdown parsers extract inline timestamps and skip headings/empty lines.
   - Codex SQLite sources are skipped gracefully when `sqlite3` is unavailable.
-- Improved segmentation: topic similarity now ignores common stopwords and strips punctuation.
+- Improved segmentation: topic similarity now uses TF-IDF weighted cosine similarity over stopword-filtered tokens, replacing the naive Jaccard heuristic.
 - Added an end-to-end pipeline test that runs the full flow without a Groq API key when no logs are present.
 - Integrated [Bound](https://github.com/sal/bound) as a first-class log source via the `bound` `log_format` and optional `bound_filter`.
 
 ### Up next
-- Replace heuristic segmentation (Jaccard + time gap) with an embedding-based or topic-model approach.
+- Explore embedding-based or topic-model segmentation for richer semantic grouping.
 - Add harness-specific structured parsers (e.g., OpenAI Codex JSONL, Kimi session logs).
 
 ## License
