@@ -271,11 +271,12 @@ cargo clippy
 - Added MIT `LICENSE` and GitHub Actions CI workflow.
 - Corrected normalization duplicate/empty entry accounting.
 - Steering detector now compiles regexes once and uses tighter patterns to avoid false positives on telemetry noise.
-- Expanded test coverage from 13 to 30 tests, replacing tautological assertions with real checks and adding a mocked Groq endpoint test.
+- Expanded test coverage from 13 to 31 tests, replacing tautological assertions with real checks and adding a mocked Groq endpoint test.
 - Added deterministic end-to-end integration test using fixture log data and a local mock Groq server.
 - Removed unused `config` and `thiserror` dependencies.
 - Improved log parsing:
   - JSON logs now extract `tool_calls`, `model`, and numeric or string timestamps.
+  - Added harness-specific field fallbacks (`ts`, `text`, `body`, `msg`) so Codex JSONL and similar formats parse out of the box.
   - Plain and Markdown parsers extract inline timestamps and skip headings/empty lines.
   - Codex SQLite sources are skipped gracefully when `sqlite3` is unavailable.
 - Improved segmentation: topic similarity now uses TF-IDF weighted cosine similarity over stopword-filtered tokens, replacing the naive Jaccard heuristic.
@@ -284,7 +285,7 @@ cargo clippy
 
 ### Up next
 - Explore embedding-based or topic-model segmentation for richer semantic grouping.
-- Add harness-specific structured parsers (e.g., OpenAI Codex JSONL, Kimi session logs).
+- Add dedicated harness parsers for proprietary or binary formats that cannot be handled by generic JSON/plain/markdown parsers.
 
 ## License
 

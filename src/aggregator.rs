@@ -189,12 +189,10 @@ impl LogAggregator {
         Ok(LogEntry {
             id: uuid::Uuid::new_v4().to_string(),
             harness: harness.to_string(),
-            timestamp: parse_json_timestamp(&value["timestamp"]).unwrap_or_else(Utc::now),
-            content: value["content"]
-                .as_str()
-                .or_else(|| value["message"].as_str())
-                .unwrap_or("")
-                .to_string(),
+            timestamp: parse_json_timestamp(&value["timestamp"])
+                .or_else(|| parse_json_timestamp(&value["ts"]))
+                .unwrap_or_else(Utc::now),
+            content: extract_json_content(&value),
             metadata: LogMetadata {
                 model: value["model"].as_str().map(String::from),
                 provider: value["provider"].as_str().map(String::from),
@@ -276,6 +274,15 @@ fn parse_json_timestamp(value: &serde_json::Value) -> Option<DateTime<Utc>> {
         return DateTime::from_timestamp(seconds, 0).map(|dt| dt.with_timezone(&Utc));
     }
     None
+}
+
+fn extract_json_content(value: &serde_json::Value) -> String {
+    for field in ["content", "message", "text", "body", "msg"] {
+        if let Some(text) = value.get(field).and_then(|v| v.as_str()) {
+            return text.to_string();
+        }
+    }
+    String::new()
 }
 
 fn parse_tool_calls(value: &serde_json::Value) -> Vec<ToolCall> {

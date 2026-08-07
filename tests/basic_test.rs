@@ -353,6 +353,33 @@ async fn aggregator_accepts_json_lines() {
 }
 
 #[tokio::test]
+async fn aggregator_parses_codex_jsonl_fields() {
+    let root = std::env::temp_dir().join(format!("dreamseq-codex-{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    fs::write(
+        root.join("history.jsonl"),
+        r#"{"session_id":"019e89bf-e974-7423-a6fd-c6c10218a0e1","ts":1780427521,"text":"Hello"}
+{"session_id":"019e89bf-e974-7423-a6fd-c6c10218a0e1","ts":1780468096,"text":"Plan the migration"}
+"#,
+    )
+    .unwrap();
+    let entries = dreamseq::LogAggregator::new()
+        .aggregate(&[HarnessConfig {
+            name: "codex".into(),
+            log_path: PathBuf::from(&root),
+            log_format: dreamseq::config::LogFormat::Json,
+            bound_filter: None,
+        }])
+        .await
+        .unwrap();
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0].content, "Hello");
+    assert_eq!(entries[0].timestamp.timestamp(), 1_780_427_521);
+    assert_eq!(entries[1].content, "Plan the migration");
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
 async fn aggregator_parses_markdown_lines() {
     let root = std::env::temp_dir().join(format!("dreamseq-md-{}", uuid::Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();
