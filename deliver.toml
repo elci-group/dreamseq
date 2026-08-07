@@ -1,0 +1,40 @@
+[[file]]
+path = "src/lib.rs"
+required = true
+forbid_regex = ["TODO", "FIXME", "unimplemented!", "panic!"]
+
+[[file]]
+path = "src/main.rs"
+required = true
+forbid_regex = ["TODO", "FIXME", "unimplemented!", "panic!"]
+
+[[file]]
+path = "Cargo.toml"
+required = true
+
+[[file]]
+path = "README.md"
+required = true
+
+[[command]]
+name = "cargo fmt check"
+cmd = ["cargo", "fmt", "--", "--check"]
+expect_exit = 0
+timeout_secs = 60
+
+[[command]]
+name = "cargo clippy"
+cmd = ["cargo", "clippy", "--", "-D", "warnings"]
+expect_exit = 0
+timeout_secs = 180
+
+[[command]]
+name = "cargo test"
+cmd = ["cargo", "test"]
+expect_exit = 0
+timeout_secs = 300
+stdout_contains = ["test result: ok"]
+
+[git]
+no_uncommitted_changes = false
+no_untracked_files = false
