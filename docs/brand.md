@@ -1,12 +1,15 @@
 # Dreamsequence brand assets
 
-The repository includes the supplied Dreamsequence logo references in [`assets/`](assets/):
+The repository includes the supplied individual Dreamsequence exports in [`assets/`](assets/):
 
-- [`dreamsequence-logo-system.png`](assets/dreamsequence-logo-system.png) — the complete logo sheet, useful for selecting the correct light, dark, accent, stacked, or symbol-only treatment.
-- [`dreamsequence-lockups.png`](assets/dreamsequence-lockups.png) — the compact lockup preview for dark, light, accent, and symbol-only contexts.
+- [`lockup-black.png`](assets/lockup-black.png) — primary lockup for light backgrounds.
+- [`lockup-white.png`](assets/lockup-white.png) — reversed lockup for dark backgrounds.
+- [`lockup-accent.png`](assets/lockup-accent.png) — indigo accent lockup for dark backgrounds.
+- [`symbol-black.png`](assets/symbol-black.png) — standalone symbol for compact monochrome use.
+- [`app-icon-16.png`](assets/app-icon-16.png), [`app-icon-32.png`](assets/app-icon-32.png), [`app-icon-64.png`](assets/app-icon-64.png), and [`app-icon-128.png`](assets/app-icon-128.png) — application icons at their intended display sizes.
 
 ## Usage
 
-Use the monochrome lockup on light backgrounds and the white or indigo lockup on dark backgrounds. Use the symbol-only mark for compact navigation, favicons, and application icons. Keep clear space around the mark and do not recolor, stretch, or crop individual lockups from the reference sheet.
+Use the black lockup on light backgrounds and the white or indigo lockup on dark backgrounds. Use the standalone symbol for compact navigation and the size-specific application icons for application surfaces. Keep clear space around the mark and do not recolor, stretch, or crop the exports.
 
-The README uses the full logo-system sheet so the project identity remains visible in both light and dark documentation themes.
+The README selects the black or white lockup automatically to remain legible in light and dark documentation themes.

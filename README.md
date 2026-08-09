@@ -5,10 +5,14 @@
 Dreamseq turns recurring friction in agent-native engineering work into verified capabilities.
 
 <p align="center">
-  <img alt="Dreamsequence logo system" src="docs/assets/dreamsequence-logo-system.png" width="640">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/lockup-white.png">
+    <source media="(prefers-color-scheme: light)" srcset="docs/assets/lockup-black.png">
+    <img alt="Dreamsequence" src="docs/assets/lockup-black.png" width="560">
+  </picture>
 </p>
 
-The logo system is kept in [`docs/assets`](docs/assets/), including the primary lockup, dark-background lockup, symbol-only mark, and application icon references supplied with the project.
+Individual lockups, symbols, and application icons are available in [`docs/assets`](docs/assets/) with usage guidance in the [brand documentation](docs/brand.md).
 
 ![Rust](https://img.shields.io/badge/rust-%23000000.svg?style=for-the-badge&logo=rust&logoColor=white)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green.svg?style=for-the-badge)
