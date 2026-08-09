@@ -24,13 +24,13 @@ timeout_secs = 60
 
 [[command]]
 name = "cargo clippy"
-cmd = ["cargo", "clippy", "--", "-D", "warnings"]
+cmd = ["cargo", "clippy", "--all-targets", "--all-features", "--", "-D", "warnings"]
 expect_exit = 0
 timeout_secs = 180
 
 [[command]]
 name = "cargo test"
-cmd = ["cargo", "test"]
+cmd = ["cargo", "test", "--all-targets", "--all-features"]
 expect_exit = 0
 timeout_secs = 300
 stdout_contains = ["test result: ok"]

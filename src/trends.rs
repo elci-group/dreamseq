@@ -59,7 +59,8 @@ impl TrendAnalyzer {
         current_anthology: &Anthology,
         days: i64,
     ) -> Result<TrendAnalysis> {
-        let previous_anthologies = self.load_previous_anthologies(days.max(1))?;
+        let previous_anthologies =
+            self.load_previous_anthologies(days.max(1), &current_anthology.id)?;
 
         let mut trends = HashMap::new();
 
@@ -103,7 +104,11 @@ impl TrendAnalyzer {
         })
     }
 
-    fn load_previous_anthologies(&self, days: i64) -> Result<Vec<Anthology>> {
+    fn load_previous_anthologies(
+        &self,
+        days: i64,
+        current_anthology_id: &str,
+    ) -> Result<Vec<Anthology>> {
         let mut anthologies = Vec::new();
         let cutoff_date = Utc::now() - Duration::days(days);
 
@@ -115,12 +120,25 @@ impl TrendAnalyzer {
             let entry = entry?;
             let path = entry.path();
 
-            if path.extension().is_some_and(|ext| ext == "json")
-                && let Ok(content) = fs::read_to_string(&path)
-                && let Ok(anthology) = serde_json::from_str::<Anthology>(&content)
-                && anthology.generated_at > cutoff_date
+            if path.extension().is_none_or(|ext| ext != "json") {
+                continue;
+            }
+            match fs::read_to_string(&path)
+                .map_err(anyhow::Error::from)
+                .and_then(|content| serde_json::from_str::<Anthology>(&content).map_err(Into::into))
             {
-                anthologies.push(anthology);
+                Ok(anthology)
+                    if anthology.generated_at > cutoff_date
+                        && anthology.id != current_anthology_id =>
+                {
+                    anthologies.push(anthology);
+                }
+                Ok(_) => {}
+                Err(error) => tracing::warn!(
+                    path = %path.display(),
+                    error = %error,
+                    "skipping unreadable anthology during trend analysis"
+                ),
             }
         }
 
@@ -196,7 +214,8 @@ impl TrendAnalyzer {
             .patterns
             .iter()
             .filter(|p| p.description.to_lowercase().contains("document"))
-            .count() as f64;
+            .map(|pattern| pattern.frequency as f64)
+            .sum::<f64>();
 
         let previous_count = if previous.is_empty() {
             0.0
@@ -207,7 +226,8 @@ impl TrendAnalyzer {
                     a.patterns
                         .iter()
                         .filter(|p| p.description.to_lowercase().contains("document"))
-                        .count() as f64
+                        .map(|pattern| pattern.frequency as f64)
+                        .sum::<f64>()
                 })
                 .sum::<f64>()
                 / previous.len() as f64
@@ -225,7 +245,8 @@ impl TrendAnalyzer {
             .patterns
             .iter()
             .filter(|p| matches!(p.pattern_type, crate::patterns::PatternType::RepeatedPrompt))
-            .count() as f64;
+            .map(|pattern| pattern.frequency as f64)
+            .sum::<f64>();
 
         let previous_count = if previous.is_empty() {
             0.0
@@ -238,7 +259,8 @@ impl TrendAnalyzer {
                         .filter(|p| {
                             matches!(p.pattern_type, crate::patterns::PatternType::RepeatedPrompt)
                         })
-                        .count() as f64
+                        .map(|pattern| pattern.frequency as f64)
+                        .sum::<f64>()
                 })
                 .sum::<f64>()
                 / previous.len() as f64
@@ -261,7 +283,8 @@ impl TrendAnalyzer {
                     crate::patterns::PatternType::RepeatedCommand
                 )
             })
-            .count() as f64;
+            .map(|pattern| pattern.frequency as f64)
+            .sum::<f64>();
 
         let previous_count = if previous.is_empty() {
             0.0
@@ -277,7 +300,8 @@ impl TrendAnalyzer {
                                 crate::patterns::PatternType::RepeatedCommand
                             )
                         })
-                        .count() as f64
+                        .map(|pattern| pattern.frequency as f64)
+                        .sum::<f64>()
                 })
                 .sum::<f64>()
                 / previous.len() as f64
@@ -312,17 +336,62 @@ impl TrendAnalyzer {
     }
 
     fn create_visualization(&self, current: f64, previous: f64) -> String {
-        // Create a simple ASCII bar chart
+        // Create a labeled, padded ASCII bar chart for easy comparison.
         let max_bars = 20;
         let scale = max_bars as f64 / current.max(previous).max(1.0);
 
         let current_bars = (current * scale) as usize;
         let previous_bars = (previous * scale) as usize;
 
+        let max_label_width = "Previous".len();
+
         format!(
-            "Current: {}█\nPrevious: {}█",
+            "{:>width$}  {:>6.2}  {}\n{:>width$}  {:>6.2}  {}",
+            "Current",
+            current,
             "█".repeat(current_bars),
-            "█".repeat(previous_bars)
+            "Previous",
+            previous,
+            "█".repeat(previous_bars),
+            width = max_label_width
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::DreamseqConfig;
+    use crate::patterns::{Pattern, PatternType};
+    use crate::report::Anthology;
+
+    #[tokio::test]
+    async fn current_anthology_is_excluded_and_frequency_is_preserved() {
+        let directory =
+            std::env::temp_dir().join(format!("dreamseq-trends-{}", uuid::Uuid::new_v4()));
+        let config = DreamseqConfig {
+            anthologies_dir: directory.clone(),
+            ..DreamseqConfig::default()
+        };
+        let mut anthology = Anthology::new(Vec::new(), Vec::new(), config);
+        anthology.patterns.push(Pattern {
+            id: "repeated-command".into(),
+            pattern_type: PatternType::RepeatedCommand,
+            description: "Repeated command: cargo test".into(),
+            frequency: 7,
+            confidence: 0.9,
+            impact_score: 0.8,
+            affected_harnesses: Vec::new(),
+        });
+        anthology.save().unwrap();
+
+        let trends = TrendAnalyzer::with_directory(directory.clone())
+            .analyze_for_days(&anthology, 30)
+            .await
+            .unwrap();
+        let command = &trends.trends["command_repetition"];
+        assert_eq!(command.current_value, 7.0);
+        assert_eq!(command.previous_value, 0.0);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 }

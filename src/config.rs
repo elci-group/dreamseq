@@ -4,12 +4,19 @@ use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DreamseqConfig {
+    /// Loaded from legacy configuration files for compatibility, but never
+    /// written back to disk. Prefer the `GROQ_API_KEY` environment variable.
+    #[serde(default, skip_serializing)]
     pub groq_api_key: String,
     pub harnesses: Vec<HarnessConfig>,
     pub output_dir: PathBuf,
     pub anthologies_dir: PathBuf,
     pub enable_tts: bool,
     pub enable_kaptaind: bool,
+    /// Explicit consent to send redacted log excerpts to the configured Groq
+    /// endpoint. Remote analysis is disabled by default.
+    #[serde(default)]
+    pub allow_remote_analysis: bool,
     /// Optional override for the Groq API base URL. Useful for testing against
     /// a local mock server.
     #[serde(default)]
@@ -29,13 +36,18 @@ pub struct HarnessConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum LogFormat {
+    #[serde(alias = "Json")]
     Json,
+    #[serde(alias = "Markdown")]
     Markdown,
+    #[serde(alias = "Plain")]
     Plain,
+    #[serde(alias = "CodexSqlite")]
     CodexSqlite,
+    #[serde(alias = "Bound")]
     Bound,
-    Custom(String),
 }
 
 impl DreamseqConfig {
@@ -128,16 +140,17 @@ impl DreamseqConfig {
     }
 
     pub fn save(&self) -> Result<()> {
-        let config_dir = dirs::home_dir()
-            .ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?
-            .join(".config")
-            .join("dreamseq");
-
-        std::fs::create_dir_all(&config_dir)?;
-
         let config_path = Self::path()?;
+        self.save_to_path(&config_path)
+    }
+
+    pub fn save_to_path(&self, config_path: &std::path::Path) -> Result<()> {
+        if let Some(config_dir) = config_path.parent() {
+            std::fs::create_dir_all(config_dir)?;
+        }
         let content = serde_json::to_string_pretty(self)?;
-        std::fs::write(&config_path, content)?;
+        std::fs::write(config_path, content)?;
+        set_private_permissions(config_path)?;
         Ok(())
     }
 }
@@ -151,8 +164,24 @@ impl Default for DreamseqConfig {
             output_dir: home.join("dreamseq").join("output"),
             anthologies_dir: home.join("dreamseq").join("anthologies"),
             enable_tts: false,
-            enable_kaptaind: true,
+            enable_kaptaind: false,
+            allow_remote_analysis: false,
             groq_base_url: None,
         }
     }
+}
+
+#[cfg(unix)]
+fn set_private_permissions(path: &std::path::Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mut permissions = std::fs::metadata(path)?.permissions();
+    permissions.set_mode(0o600);
+    std::fs::set_permissions(path, permissions)?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn set_private_permissions(_path: &std::path::Path) -> Result<()> {
+    Ok(())
 }

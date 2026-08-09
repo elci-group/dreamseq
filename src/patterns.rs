@@ -150,7 +150,7 @@ impl PatternExtractor {
         }
 
         // Sort by impact score
-        patterns.sort_by(|a, b| b.impact_score.partial_cmp(&a.impact_score).unwrap());
+        patterns.sort_by(|a, b| b.impact_score.total_cmp(&a.impact_score));
 
         Ok(patterns)
     }

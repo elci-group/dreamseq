@@ -41,8 +41,8 @@ impl BoundClient {
 
     /// Aggregate files from a harness using the `bound` binary.
     ///
-    /// If `bound` is not installed, returns an empty vector so the pipeline can
-    /// continue with other harnesses.
+    /// Missing Bound installations are returned as contextual errors so the
+    /// ingestion report can account for the rejected source.
     pub async fn aggregate(&self, harness: &HarnessConfig) -> Result<Vec<LogEntry>> {
         let binary = std::env::var("BOUND_BINARY").unwrap_or_else(|_| "bound".to_string());
 
@@ -51,11 +51,7 @@ impl BoundClient {
             .output()
             .is_err()
         {
-            tracing::warn!(
-                "bound binary not found; skipping Bound harness {}",
-                harness.name
-            );
-            return Ok(Vec::new());
+            anyhow::bail!("bound binary not found for harness {}", harness.name);
         }
 
         let output_path = std::env::temp_dir().join(format!("bound-{}.json", uuid::Uuid::new_v4()));
@@ -75,18 +71,32 @@ impl BoundClient {
 
         let status = command.status()?;
         if !status.success() {
+            if let Err(error) = std::fs::remove_file(&output_path)
+                && error.kind() != std::io::ErrorKind::NotFound
+            {
+                tracing::warn!(path = %output_path.display(), error = %error, "failed to remove Bound output after command failure");
+            }
             anyhow::bail!("bound failed for harness {}", harness.name);
         }
 
-        let content = std::fs::read_to_string(&output_path)?;
-        std::fs::remove_file(&output_path).ok();
+        let content_result = std::fs::read_to_string(&output_path);
+        if let Err(error) = std::fs::remove_file(&output_path) {
+            tracing::warn!(path = %output_path.display(), error = %error, "failed to remove temporary Bound output");
+        }
+        let content = content_result?;
 
         let output: BoundOutput = serde_json::from_str(&content)?;
 
         Ok(output
             .files
             .into_iter()
-            .filter_map(|file| self.bound_file_to_log_entry(file, &harness.name))
+            .filter_map(|file| {
+                let entry = self.bound_file_to_log_entry(file, &harness.name);
+                if entry.is_none() {
+                    tracing::warn!(harness = %harness.name, "Bound record had no metadata and was rejected");
+                }
+                entry
+            })
             .collect())
     }
 

@@ -50,7 +50,8 @@ fn test_config_default() {
     assert!(config.anthologies_dir.ends_with("dreamseq/anthologies"));
     assert!(config.harnesses.is_empty());
     assert!(!config.enable_tts);
-    assert!(config.enable_kaptaind);
+    assert!(!config.enable_kaptaind);
+    assert!(!config.allow_remote_analysis);
     assert_eq!(
         config.groq_api_key,
         std::env::var("GROQ_API_KEY").unwrap_or_default()
@@ -59,12 +60,62 @@ fn test_config_default() {
 }
 
 #[test]
-fn test_config_load_missing_uses_discovered_defaults() {
-    let config = DreamseqConfig::load().unwrap();
+fn readme_style_lowercase_log_formats_load() {
+    let config: DreamseqConfig = serde_json::from_str(
+        r#"{
+            "harnesses": [{"name":"logs","log_path":"/tmp/logs","log_format":"json"}],
+            "output_dir":"/tmp/output",
+            "anthologies_dir":"/tmp/anthologies",
+            "enable_tts":false,
+            "enable_kaptaind":false
+        }"#,
+    )
+    .unwrap();
+    assert!(matches!(
+        config.harnesses[0].log_format,
+        dreamseq::config::LogFormat::Json
+    ));
+}
+
+#[test]
+fn serialized_config_never_contains_api_key() {
+    let config = DreamseqConfig {
+        groq_api_key: "super-secret-test-key".into(),
+        ..DreamseqConfig::default()
+    };
+    let serialized = serde_json::to_string(&config).unwrap();
+    assert!(!serialized.contains("super-secret-test-key"));
+    assert!(!serialized.contains("groq_api_key"));
+}
+
+#[test]
+fn saved_config_is_private_and_secret_free() {
+    let root = std::env::temp_dir().join(format!("dreamseq-private-{}", uuid::Uuid::new_v4()));
+    let path = root.join("config.json");
+    let config = DreamseqConfig {
+        groq_api_key: "must-not-be-written".into(),
+        ..DreamseqConfig::default()
+    };
+    config.save_to_path(&path).unwrap();
+    let content = fs::read_to_string(&path).unwrap();
+    assert!(!content.contains("must-not-be-written"));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn discovered_config_uses_safe_defaults() {
+    let config = DreamseqConfig::discover();
     let default = DreamseqConfig::default();
 
-    // When the config file is absent, load() falls back to discovery(), which
-    // keeps the same default directories and flags.
+    // Discovery adds existing log sources while preserving safe defaults.
     assert_eq!(config.anthologies_dir, default.anthologies_dir);
     assert_eq!(config.output_dir, default.output_dir);
     assert_eq!(config.enable_tts, default.enable_tts);
@@ -217,15 +268,16 @@ fn telemetry_again_is_not_manual_repetition() {
 }
 
 #[test]
-fn normalization_deduplicates_after_whitespace_cleanup() {
+fn normalization_preserves_repeated_evidence_after_whitespace_cleanup() {
     let entries = vec![log_entry("  Hello   world  "), log_entry("hello world")];
     let normalized = Normalizer.normalize(entries).unwrap();
-    assert_eq!(normalized.len(), 1);
+    assert_eq!(normalized.len(), 2);
     assert_eq!(normalized[0].content, "Hello world");
+    assert_eq!(normalized[1].content, "hello world");
 }
 
 #[test]
-fn normalization_counts_empty_and_duplicate_entries() {
+fn normalization_removes_empty_entries_but_retains_duplicates() {
     let entries = vec![
         log_entry("first"),
         log_entry("first"),
@@ -233,8 +285,11 @@ fn normalization_counts_empty_and_duplicate_entries() {
         log_entry("second"),
     ];
     let normalized = Normalizer.normalize(entries.clone()).unwrap();
-    assert_eq!(normalized.len(), 2);
-    assert!(normalized.iter().any(|e| e.content == "first"));
+    assert_eq!(normalized.len(), 3);
+    assert_eq!(
+        normalized.iter().filter(|e| e.content == "first").count(),
+        2
+    );
     assert!(normalized.iter().any(|e| e.content == "second"));
 }
 
@@ -306,6 +361,37 @@ fn groq_prompt_includes_segments_and_schema() {
     assert!(prompt.contains("model_failures"));
     assert!(prompt.contains("debug the build"));
     assert!(prompt.contains("Log segments:"));
+    assert!(prompt.contains("untrusted data"));
+}
+
+#[test]
+fn groq_prompt_covers_all_segments_and_redacts_credentials() {
+    let client = GroqClient::new("test").unwrap();
+    let segments: Vec<Segment> = (0..25)
+        .map(|index| {
+            segment_with_content(&format!(
+                "segment-{index} api_key=secret-value-{index} authorization: Bearer token-{index} user@example.com /home/alice/project"
+            ))
+        })
+        .collect();
+    let prompts = client.build_analysis_prompts_for_test(&segments);
+    let combined = prompts.join("\n");
+    assert!(combined.contains("segment-24"));
+    assert!(!combined.contains("secret-value"));
+    assert!(!combined.contains("Bearer token"));
+    assert!(!combined.contains("user@example.com"));
+    assert!(!combined.contains("/home/alice"));
+    assert!(prompts.iter().all(|prompt| prompt.len() <= 48_100));
+}
+
+#[test]
+fn groq_prompt_batches_oversized_entries_without_dropping_tail() {
+    let client = GroqClient::new("test").unwrap();
+    let content = format!("{}TAIL-MARKER", "a".repeat(100_000));
+    let prompts = client.build_analysis_prompts_for_test(&[segment_with_content(&content)]);
+    assert!(prompts.len() >= 3);
+    assert!(prompts.iter().any(|prompt| prompt.contains("TAIL-MARKER")));
+    assert!(prompts.iter().all(|prompt| prompt.len() <= 48_100));
 }
 
 #[tokio::test]
@@ -350,6 +436,53 @@ async fn aggregator_accepts_json_lines() {
         .unwrap();
     assert_eq!(entries.len(), 2);
     fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn ingestion_report_records_malformed_files() {
+    let root = std::env::temp_dir().join(format!("dreamseq-invalid-{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("broken.jsonl"), "{not json}\n").unwrap();
+    let (entries, report) = dreamseq::LogAggregator::new()
+        .aggregate_with_report(&[HarnessConfig {
+            name: "broken".into(),
+            log_path: root.clone(),
+            log_format: dreamseq::config::LogFormat::Json,
+            bound_filter: None,
+        }])
+        .await
+        .unwrap();
+    assert!(entries.is_empty());
+    assert_eq!(report.files_seen, 1);
+    assert_eq!(report.files_failed, 1);
+    assert!(!report.harnesses[0].warnings.is_empty());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn aggregation_does_not_follow_symbolic_links() {
+    use std::os::unix::fs::symlink;
+
+    let root = std::env::temp_dir().join(format!("dreamseq-links-{}", uuid::Uuid::new_v4()));
+    let outside = std::env::temp_dir().join(format!("dreamseq-outside-{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(outside.join("private.log"), "must not be ingested").unwrap();
+    symlink(&outside, root.join("outside-link")).unwrap();
+
+    let entries = dreamseq::LogAggregator::new()
+        .aggregate(&[HarnessConfig {
+            name: "links".into(),
+            log_path: root.clone(),
+            log_format: dreamseq::config::LogFormat::Plain,
+            bound_filter: None,
+        }])
+        .await
+        .unwrap();
+    assert!(entries.is_empty());
+    fs::remove_dir_all(root).unwrap();
+    fs::remove_dir_all(outside).unwrap();
 }
 
 #[tokio::test]
@@ -583,9 +716,63 @@ async fn full_pipeline_runs_without_api_key_when_no_logs() {
     assert!(anthology.patterns.is_empty());
     assert!(anthology.steering_events.is_empty());
     assert!(anthology.save().is_ok());
+    assert_eq!(
+        fs::read_dir(&anthology.config.output_dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .count(),
+        1,
+        "each run should write one ingestion report"
+    );
 
     fs::remove_dir_all(&anthology.config.anthologies_dir).ok();
     fs::remove_dir_all(&anthology.config.output_dir).ok();
+}
+
+#[tokio::test]
+async fn nonempty_pipeline_requires_explicit_remote_consent() {
+    use dreamseq::{Dreamseq, DreamseqConfig};
+
+    let root = std::env::temp_dir().join(format!("dreamseq-consent-{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("log.txt"), "analyze this log").unwrap();
+    let mut config = DreamseqConfig::default();
+    config.enable_kaptaind = false;
+    config.harnesses = vec![HarnessConfig {
+        name: "fixture".into(),
+        log_path: root.clone(),
+        log_format: dreamseq::config::LogFormat::Plain,
+        bound_filter: None,
+    }];
+    config.output_dir = root.join("output");
+
+    let error = Dreamseq::new(config)
+        .unwrap()
+        .run()
+        .await
+        .expect_err("remote analysis should require explicit consent");
+    assert!(error.to_string().contains("remote analysis is disabled"));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn anthology_saves_do_not_overwrite_same_day_runs() {
+    use dreamseq::report::Anthology;
+
+    let directory = std::env::temp_dir().join(format!("dreamseq-save-{}", uuid::Uuid::new_v4()));
+    let first_config = DreamseqConfig {
+        anthologies_dir: directory.clone(),
+        ..DreamseqConfig::default()
+    };
+    let second_config = first_config.clone();
+    let first = Anthology::new(Vec::new(), Vec::new(), first_config);
+    let second = Anthology::new(Vec::new(), Vec::new(), second_config);
+    let first_path = first.save().unwrap();
+    let second_path = second.save().unwrap();
+    assert_ne!(first_path, second_path);
+    assert!(first_path.exists());
+    assert!(second_path.exists());
+    fs::remove_dir_all(directory).unwrap();
 }
 
 #[tokio::test]
@@ -631,6 +818,7 @@ async fn full_pipeline_with_fixture_data() {
 
     let mut config = DreamseqConfig::default();
     config.groq_api_key = "test-key".to_string();
+    config.allow_remote_analysis = true;
     config.groq_base_url = Some(format!("http://{}", addr));
     config.enable_kaptaind = false;
     config.harnesses = vec![

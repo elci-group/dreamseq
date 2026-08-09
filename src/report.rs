@@ -65,6 +65,8 @@ pub struct CandidateTool {
     pub id: String,
     pub name: String,
     pub priority: Priority,
+    #[serde(default)]
+    pub category: InterventionCategory,
     pub reason: String,
     pub estimated_time_saved: String,
     pub confidence: f64,
@@ -84,6 +86,33 @@ pub enum Priority {
     High,
     Medium,
     Low,
+}
+
+/// High-level category used by the human-facing renderer to group
+/// candidate interventions. Kept intentionally coarse so the report stays
+/// scannable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum InterventionCategory {
+    MissingCapability,
+    WorkflowAcceleration,
+    PackageManagerFriction,
+    ModelReliability,
+    ContextManagement,
+    #[default]
+    Other,
+}
+
+impl std::fmt::Display for InterventionCategory {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            InterventionCategory::MissingCapability => write!(f, "Missing capability"),
+            InterventionCategory::WorkflowAcceleration => write!(f, "Workflow acceleration"),
+            InterventionCategory::PackageManagerFriction => write!(f, "Package-manager friction"),
+            InterventionCategory::ModelReliability => write!(f, "Model reliability"),
+            InterventionCategory::ContextManagement => write!(f, "Context management"),
+            InterventionCategory::Other => write!(f, "Other friction"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -165,7 +194,7 @@ impl Anthology {
             .count();
 
         self.executive_summary = format!(
-            "{}: reviewed {} raw entries, reduced to {} unique events across {} segments (~{} estimated input tokens). Found {} patterns and {} human steering events; {} high-impact opportunities require follow-up.",
+            "{}: reviewed {} raw entries and retained {} normalized events across {} segments (~{} estimated input tokens). Found {} patterns and {} human steering events; {} high-impact opportunities require follow-up.",
             self.date,
             self.pipeline.raw_entries,
             self.pipeline.normalized_entries,
@@ -301,11 +330,13 @@ impl Anthology {
 
                 let name = self.suggest_tool_name(&pattern.description);
                 let existing_matches = self.find_existing_matches(&name);
+                let category = category_from_pattern_type(&pattern.pattern_type, &name);
                 self.candidate_tools.push(CandidateTool {
                     id: format!("DS-{:04}", tool_id),
-                    name: self.suggest_tool_name(&pattern.description),
+                    name: name.clone(),
                     priority,
-                    reason: pattern.description.clone(),
+                    category,
+                    reason: truncate_rationale(&pattern.description, 240),
                     estimated_time_saved: format!(
                         "{} min/day",
                         (pattern.impact_score * 20.0) as i32
@@ -350,13 +381,6 @@ impl Anthology {
             }
             let average_severity =
                 events.iter().map(|event| event.severity).sum::<f64>() / events.len() as f64;
-            let evidence = events
-                .iter()
-                .take(3)
-                .map(|event| event.context.as_str())
-                .filter(|context| !context.is_empty())
-                .collect::<Vec<_>>()
-                .join(" | ");
             let existing_matches = self.find_existing_matches(name);
             let overlap = (existing_matches.len() as f64 / 3.0).min(1.0);
             let fitness = (average_severity * 0.55
@@ -371,23 +395,18 @@ impl Anthology {
                 } else {
                     Priority::Medium
                 },
+                category: category_from_steering_category(&category, name),
                 reason: format!(
-                    "{} steering events clustered as {:?}. Evidence: {}",
+                    "{} steering events clustered as {:?}",
                     events.len(),
-                    category,
-                    evidence
+                    category
                 ),
                 estimated_time_saved: format!(
                     "{} min/day",
                     (average_severity * events.len() as f64 * 2.0) as i32
                 ),
                 confidence: (average_severity + (events.len() as f64 / 20.0).min(1.0)) / 2.0,
-                affected_projects: events
-                    .iter()
-                    .map(|event| event.context.clone())
-                    .filter(|context| !context.is_empty())
-                    .take(5)
-                    .collect(),
+                affected_projects: Vec::new(),
                 existing_matches,
                 mutation_fitness: fitness,
                 capability_overlap: overlap,
@@ -399,26 +418,57 @@ impl Anthology {
             });
         }
         self.candidate_tools
-            .sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap());
+            .sort_by(|a, b| b.confidence.total_cmp(&a.confidence));
     }
 
     fn find_existing_matches(&self, intervention: &str) -> Vec<String> {
-        let home = std::env::var_os("HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("/home/sal"));
-        let names = match intervention {
-            "workflow-automator" => &["hellhound", "kaptaind", "deckhand"][..],
-            "workflow-acceleration" => &["goblin", "deckhand", "kaptaind"][..],
-            "context-manager" => &["speck", "bound", "jeenome"][..],
-            "verification-gateway" => &["traci", "deliver", "four-eyes"][..],
-            "architecture-reviewer" => &["fract", "cambrian"][..],
-            _ => &[][..],
+        let Some(home) = dirs::home_dir() else {
+            return Vec::new();
         };
-        names
-            .iter()
-            .filter(|name| home.join(name).is_dir())
-            .map(|name| name.to_string())
-            .collect()
+        let Ok(content) = fs::read_to_string(home.join(".speckrc")) else {
+            return Vec::new();
+        };
+        let Ok(document) = content.parse::<toml::Value>() else {
+            tracing::warn!("could not parse ~/.speckrc while matching existing capabilities");
+            return Vec::new();
+        };
+        let Some(tools) = document.get("tools").and_then(toml::Value::as_table) else {
+            return Vec::new();
+        };
+        let keywords: Vec<String> = intervention
+            .split(|character: char| !character.is_alphanumeric())
+            .filter(|word| {
+                word.len() >= 4
+                    && !matches!(
+                        word.to_ascii_lowercase().as_str(),
+                        "tool" | "manager" | "assistant" | "helper"
+                    )
+            })
+            .map(str::to_lowercase)
+            .collect();
+        let mut matches = Vec::new();
+        for (name, tool) in tools {
+            let Some(path) = tool.get("path").and_then(toml::Value::as_str) else {
+                continue;
+            };
+            let root = PathBuf::from(path);
+            if !root.is_dir() {
+                continue;
+            }
+            let mut searchable = name.to_lowercase();
+            for relative in [".speck/manifest.toml", "README.md"] {
+                if let Ok(text) = fs::read_to_string(root.join(relative)) {
+                    searchable.push(' ');
+                    searchable.push_str(&text.to_lowercase());
+                }
+            }
+            if !keywords.is_empty() && keywords.iter().any(|keyword| searchable.contains(keyword)) {
+                matches.push(name.clone());
+            }
+        }
+        matches.sort();
+        matches.truncate(5);
+        matches
     }
 
     fn suggest_tool_name(&self, description: &str) -> String {
@@ -444,7 +494,7 @@ impl Anthology {
     pub fn save(&self) -> Result<PathBuf> {
         fs::create_dir_all(&self.config.anthologies_dir)?;
 
-        let filename = format!("dreamseq-{}.json", self.date);
+        let filename = format!("dreamseq-{}-{}.json", self.date, self.id);
         let filepath = self.config.anthologies_dir.join(filename);
 
         let content = serde_json::to_string_pretty(self)?;
@@ -482,7 +532,7 @@ impl Anthology {
         output.push_str("source:\n");
         output.push_str(&format!("    logs: {}\n", self.pipeline.raw_entries));
         output.push_str(&format!(
-            "    unique_events: {}\n",
+            "    normalized_events: {}\n",
             self.pipeline.normalized_entries
         ));
         output.push_str(&format!("    segments: {}\n", self.pipeline.segments));
@@ -514,7 +564,7 @@ impl Anthology {
         fs::write(
             dreams_dir
                 .join("history")
-                .join(format!("{}.dreams", self.date)),
+                .join(format!("{}-{}.dreams", self.date, self.id)),
             &output,
         )?;
         Ok(path)
@@ -551,7 +601,7 @@ impl Anthology {
             });
         }
 
-        directives.sort_by(|a, b| b.automation_score.partial_cmp(&a.automation_score).unwrap());
+        directives.sort_by(|a, b| b.automation_score.total_cmp(&a.automation_score));
 
         directives
     }
@@ -559,4 +609,58 @@ impl Anthology {
 
 fn yaml_scalar(value: &str) -> String {
     format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+fn category_from_pattern_type(
+    pattern_type: &crate::patterns::PatternType,
+    name: &str,
+) -> InterventionCategory {
+    if name.contains("package") {
+        return InterventionCategory::PackageManagerFriction;
+    }
+    match pattern_type {
+        crate::patterns::PatternType::MissingTool
+        | crate::patterns::PatternType::AutomationOpportunity => {
+            InterventionCategory::MissingCapability
+        }
+        crate::patterns::PatternType::WorkflowBottleneck
+        | crate::patterns::PatternType::RepeatedCommand => {
+            InterventionCategory::WorkflowAcceleration
+        }
+        crate::patterns::PatternType::RepeatedPrompt
+        | crate::patterns::PatternType::ContextLoss => InterventionCategory::ContextManagement,
+        crate::patterns::PatternType::ModelFailure => InterventionCategory::ModelReliability,
+        crate::patterns::PatternType::HarnessFriction => InterventionCategory::Other,
+    }
+}
+
+fn category_from_steering_category(
+    category: &crate::steering::SteeringCategory,
+    name: &str,
+) -> InterventionCategory {
+    if name.contains("package") {
+        return InterventionCategory::PackageManagerFriction;
+    }
+    match category {
+        crate::steering::SteeringCategory::MissingTool => InterventionCategory::MissingCapability,
+        crate::steering::SteeringCategory::MissingContext => {
+            InterventionCategory::ContextManagement
+        }
+        crate::steering::SteeringCategory::Hallucination => InterventionCategory::ModelReliability,
+        crate::steering::SteeringCategory::ManualRepetition => {
+            InterventionCategory::WorkflowAcceleration
+        }
+        crate::steering::SteeringCategory::WrongAbstraction
+        | crate::steering::SteeringCategory::ExcessVerbosity
+        | crate::steering::SteeringCategory::ArchitecturalMismatch
+        | crate::steering::SteeringCategory::Other => InterventionCategory::Other,
+    }
+}
+
+fn truncate_rationale(value: &str, max_len: usize) -> String {
+    if value.len() <= max_len {
+        value.to_string()
+    } else {
+        format!("{}…", &value[..max_len.saturating_sub(1)])
+    }
 }

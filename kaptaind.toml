@@ -28,7 +28,7 @@ branch = "main"
 min_commit_interval = 10
 
 [test]
-command = "cargo test"
+command = "cargo test --all-targets --all-features -- --skip groq_client_hits_custom_endpoint --skip full_pipeline_with_fixture_data"
 required = true
 
 # [staging]

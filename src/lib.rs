@@ -5,6 +5,7 @@ pub mod groq;
 pub mod kaptaind;
 pub mod normalization;
 pub mod patterns;
+pub mod present;
 pub mod report;
 pub mod segmentation;
 pub mod steering;
@@ -76,13 +77,20 @@ impl Dreamseq {
         }
 
         // Step 1: Aggregate logs from all harnesses
-        let raw_logs = self.aggregator.aggregate(&self.config.harnesses).await?;
+        let (raw_logs, ingestion_report) = self
+            .aggregator
+            .aggregate_with_report(&self.config.harnesses)
+            .await?;
         let raw_count = raw_logs.len();
-        tracing::info!("Aggregated {} log entries", raw_count);
+        self.save_ingestion_report(&ingestion_report).await?;
+        tracing::info!(raw_entries = raw_count, "aggregated log entries");
 
         // Step 2: Normalize logs
         let normalized_logs = self.normalizer.normalize(raw_logs)?;
-        tracing::info!("Normalized to {} unique entries", normalized_logs.len());
+        tracing::info!(
+            normalized_entries = normalized_logs.len(),
+            "normalized log entries while retaining repeated evidence"
+        );
 
         // Step 3: Semantic segmentation
         let normalized_count = normalized_logs.len();
@@ -94,6 +102,11 @@ impl Dreamseq {
         tracing::info!("Created {} segments", segments.len());
 
         // Step 4: Analyze with Groq
+        if !segments.is_empty() && !self.config.allow_remote_analysis {
+            anyhow::bail!(
+                "remote analysis is disabled; set allow_remote_analysis=true after reviewing the privacy implications"
+            );
+        }
         let analysis = self.groq_client.analyze(&segments).await?;
         tracing::info!("Completed Groq analysis");
 
@@ -115,18 +128,37 @@ impl Dreamseq {
         });
 
         // Step 8: Cross-day trend analysis
-        if let Ok(trends) = self.trend_analyzer.analyze(&anthology).await {
-            anthology.add_trends(trends);
-            tracing::info!("Added trend analysis");
+        match self.trend_analyzer.analyze(&anthology).await {
+            Ok(trends) => {
+                anthology.add_trends(trends);
+                tracing::info!("added trend analysis");
+            }
+            Err(error) => tracing::warn!(error = %error, "trend analysis was unavailable"),
         }
 
         // Step 9: Run kaptaind analysis if enabled
-        if let Some(monitor) = &self.kaptaind_monitor
-            && let Ok(analysis) = monitor.analyze()
-        {
-            tracing::info!("Kaptaind analysis: {}", analysis);
+        if let Some(monitor) = &self.kaptaind_monitor {
+            match monitor.analyze() {
+                Ok(analysis) => tracing::info!(analysis, "Kaptaind analysis completed"),
+                Err(error) => tracing::warn!(error = %error, "Kaptaind analysis was unavailable"),
+            }
         }
 
         Ok(anthology)
+    }
+
+    async fn save_ingestion_report(
+        &self,
+        report: &crate::aggregator::IngestionReport,
+    ) -> Result<()> {
+        tokio::fs::create_dir_all(&self.config.output_dir).await?;
+        let path = self
+            .config
+            .output_dir
+            .join(format!("ingestion-{}.json", uuid::Uuid::new_v4().simple()));
+        let content = serde_json::to_vec_pretty(report)?;
+        tokio::fs::write(&path, content).await?;
+        tracing::info!(path = %path.display(), "saved ingestion report");
+        Ok(())
     }
 }
