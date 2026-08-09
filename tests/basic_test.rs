@@ -338,6 +338,140 @@ async fn groq_client_hits_custom_endpoint() {
     let _ = server.await;
 }
 
+#[tokio::test]
+async fn routed_inference_prefers_dreamsequence_cloud() {
+    use dreamseq::cloud::Credentials;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let analysis = empty_analysis_json();
+    let body = serde_json::json!({
+        "content": analysis.to_string(),
+        "usage": {"total_tokens": 12},
+        "provider": "dreamsequence-test",
+        "model": "frontier-test"
+    })
+    .to_string();
+    let response = http_response(200, &body);
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut buffer = [0_u8; 65536];
+        let count = socket.read(&mut buffer).await.unwrap();
+        let request = String::from_utf8_lossy(&buffer[..count]);
+        assert!(request.contains("POST /api/v1/inference"));
+        assert!(
+            request
+                .to_ascii_lowercase()
+                .contains("authorization: bearer ds_test")
+        );
+        socket.write_all(response.as_bytes()).await.unwrap();
+    });
+    let credentials = Credentials {
+        api_url: format!("http://{address}"),
+        access_token: "ds_test".into(),
+        account_id: "user:test".into(),
+        device_id: "dev_test".into(),
+        paired_at: chrono::Utc::now(),
+    };
+    let client =
+        GroqClient::new_routed_for_test(Some(credentials), "unused", "http://127.0.0.1:9").unwrap();
+    client
+        .analyze(&[segment_with_content("cloud first")])
+        .await
+        .unwrap();
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn routed_inference_falls_back_to_byok() {
+    use dreamseq::cloud::Credentials;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    let cloud = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let cloud_address = cloud.local_addr().unwrap();
+    let cloud_server = tokio::spawn(async move {
+        for _ in 0..3 {
+            let (mut socket, _) = cloud.accept().await.unwrap();
+            let mut buffer = [0_u8; 8192];
+            let _ = socket.read(&mut buffer).await.unwrap();
+            socket
+                .write_all(http_response(503, "{\"error\":\"unavailable\"}").as_bytes())
+                .await
+                .unwrap();
+        }
+    });
+
+    let byok = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let byok_address = byok.local_addr().unwrap();
+    let body = serde_json::json!({
+        "choices": [{"message": {"content": empty_analysis_json().to_string()}}],
+        "usage": {"total_tokens": 15}
+    })
+    .to_string();
+    let response = http_response(200, &body);
+    let byok_server = tokio::spawn(async move {
+        let (mut socket, _) = byok.accept().await.unwrap();
+        let mut buffer = [0_u8; 65536];
+        let count = socket.read(&mut buffer).await.unwrap();
+        let request = String::from_utf8_lossy(&buffer[..count]);
+        assert!(request.contains("POST /chat/completions"));
+        assert!(
+            request
+                .to_ascii_lowercase()
+                .contains("authorization: bearer byok_test")
+        );
+        socket.write_all(response.as_bytes()).await.unwrap();
+    });
+
+    let credentials = Credentials {
+        api_url: format!("http://{cloud_address}"),
+        access_token: "ds_test".into(),
+        account_id: "user:test".into(),
+        device_id: "dev_test".into(),
+        paired_at: chrono::Utc::now(),
+    };
+    let client = GroqClient::new_routed_for_test(
+        Some(credentials),
+        "byok_test",
+        &format!("http://{byok_address}"),
+    )
+    .unwrap();
+    client
+        .analyze(&[segment_with_content("fallback")])
+        .await
+        .unwrap();
+    cloud_server.await.unwrap();
+    byok_server.await.unwrap();
+}
+
+fn empty_analysis_json() -> serde_json::Value {
+    serde_json::json!({
+        "model_failures": [],
+        "harness_friction": [],
+        "missing_tooling": [],
+        "workflow_bottlenecks": [],
+        "repeated_commands": [],
+        "repeated_prompts": [],
+        "context_loss": [],
+        "automation_opportunities": []
+    })
+}
+
+fn http_response(status: u16, body: &str) -> String {
+    let reason = if status == 200 {
+        "OK"
+    } else {
+        "Service Unavailable"
+    };
+    format!(
+        "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
+}
+
 #[test]
 fn analysis_parser_accepts_numeric_descriptions() {
     let client = GroqClient::new("test").unwrap();

@@ -111,6 +111,46 @@ cargo build --release
 cargo run -- init
 ```
 
+### Pair with Dreamsequence.pro
+
+Pairing uses a short-lived browser code. The resulting device credential is stored at `~/.config/dreamseq/credentials.json` with owner-only permissions; raw prompts and log files are never uploaded.
+
+```bash
+# Open the browser pairing page and approve this device
+dreamseq login
+
+# Successful runs sync a privacy-reduced summary automatically
+dreamseq run
+
+# Upload existing anthology JSON from configured output directories
+dreamseq sync
+
+# Or scan explicit directories
+dreamseq sync --dir ~/dreamseq/anthologies --dir /path/to/other/output
+
+# Revoke the server token before removing the local credential
+dreamseq logout
+```
+
+For self-hosted development, pass `--api-url https://your-host` to `login`. Plain HTTP is accepted only for loopback test servers.
+
+### Inference routing and BYOK fallback
+
+When a device is paired, Dreamseq sends each already-redacted analysis batch to `dreamsequence.pro` first. Retryable cloud failures, unavailable service configuration, and invalid model output fall through to local BYOK routes in order. Set `DREAMSEQ_DISABLE_CLOUD_INFERENCE=1` to use BYOK exclusively.
+
+The legacy `GROQ_API_KEY` remains an automatic final route. Any OpenAI-compatible providers can be configured without writing their keys into Dreamseq files:
+
+```bash
+export PRIMARY_INFERENCE_KEY='...'
+export SECONDARY_INFERENCE_KEY='...'
+export DREAMSEQ_BYOK_ROUTES='[
+  {"name":"primary","base_url":"https://primary.example/v1","model":"provider-model","api_key_env":"PRIMARY_INFERENCE_KEY"},
+  {"name":"secondary","base_url":"https://secondary.example/v1","model":"fallback-model","api_key_env":"SECONDARY_INFERENCE_KEY"}
+]'
+```
+
+For a single provider, set `DREAMSEQ_BYOK_API_KEY`, `DREAMSEQ_BYOK_BASE_URL`, and `DREAMSEQ_BYOK_MODEL` together. Non-loopback provider URLs must use HTTPS.
+
 ---
 
 ## ⚙️ Configuration
@@ -149,7 +189,10 @@ Dreamseq uses a JSON configuration file at `~/.config/dreamseq/config.json` (leg
 
 | Option | Required? | Description |
 |---|---|---|
-| `GROQ_API_KEY` environment variable | For remote analysis | Groq credential; never written by Dreamseq. Legacy configuration values are still accepted while migrating. |
+| `GROQ_API_KEY` environment variable | Optional fallback | Legacy Groq BYOK credential; never written by Dreamseq. |
+| `DREAMSEQ_BYOK_ROUTES` environment variable | ❌ No | Ordered JSON array of OpenAI-compatible fallback routes. Each route names the environment variable containing its key. |
+| `DREAMSEQ_BYOK_API_KEY`, `DREAMSEQ_BYOK_BASE_URL`, `DREAMSEQ_BYOK_MODEL` | ❌ No | Shorthand for one BYOK fallback route. Set all three together. |
+| `DREAMSEQ_DISABLE_CLOUD_INFERENCE` | ❌ No | Set to `1` to bypass paired Dreamsequence inference and use BYOK only. |
 | `harnesses` | ✅ Yes | Array of harness configurations. |
 | `harnesses[].name` | ✅ Yes | Identifier for the harness. |
 | `harnesses[].log_path` | ✅ Yes | Path to log files or project snapshots. |
@@ -159,7 +202,7 @@ Dreamseq uses a JSON configuration file at `~/.config/dreamseq/config.json` (leg
 | `anthologies_dir` | ✅ Yes | Directory for generated anthologies. |
 | `enable_tts` | ✅ Yes | Enable text-to-speech notifications. |
 | `enable_kaptaind` | ✅ Yes | Opt in to Kaptaind status and analysis integration. Defaults to `false` because external analyzers may write project metadata. |
-| `allow_remote_analysis` | ✅ Yes | Explicit consent to send redacted log excerpts to the configured Groq endpoint. Defaults to `false`. |
+| `allow_remote_analysis` | ✅ Yes | Explicit consent to send redacted excerpts to Dreamsequence or configured BYOK endpoints. Defaults to `false`. |
 
 ---
 

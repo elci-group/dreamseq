@@ -1,5 +1,5 @@
 use crate::config::HarnessConfig;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use chrono::{DateTime, NaiveDateTime, Utc};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -59,6 +59,12 @@ static TIMESTAMP_PREFIX_RE: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 pub struct LogAggregator;
+
+#[derive(Debug, Deserialize)]
+struct CodexSqliteRow {
+    ts: i64,
+    feedback_log_body: String,
+}
 
 impl Default for LogAggregator {
     fn default() -> Self {
@@ -217,7 +223,7 @@ impl LogAggregator {
         }
 
         let output = std::process::Command::new("sqlite3")
-            .args(["-separator", "\t"])
+            .arg("-json")
             .arg(path)
             .arg("SELECT ts, feedback_log_body FROM logs WHERE feedback_log_body IS NOT NULL ORDER BY ts")
             .output()?;
@@ -227,24 +233,16 @@ impl LogAggregator {
                 String::from_utf8_lossy(&output.stderr)
             );
         }
-        let mut entries = Vec::new();
-        for (line_number, line) in String::from_utf8_lossy(&output.stdout).lines().enumerate() {
-            let Some((seconds, content)) = line.split_once('\t') else {
-                tracing::warn!(harness, line_number, "invalid Codex SQLite row");
-                continue;
-            };
-            let timestamp = match seconds.parse::<i64>() {
-                Ok(value) => chrono::DateTime::from_timestamp(value, 0),
-                Err(error) => {
-                    tracing::warn!(harness, line_number, timestamp = seconds, error = %error, "invalid Codex timestamp");
-                    None
-                }
-            };
+        let rows: Vec<CodexSqliteRow> = serde_json::from_slice(&output.stdout)
+            .context("sqlite3 returned invalid JSON while reading Codex logs")?;
+        let mut entries = Vec::with_capacity(rows.len());
+        for (row_number, row) in rows.into_iter().enumerate() {
+            let timestamp = chrono::DateTime::from_timestamp(row.ts, 0);
             let Some(timestamp) = timestamp else {
                 tracing::warn!(
                     harness,
-                    line_number,
-                    timestamp = seconds,
+                    row_number,
+                    timestamp = row.ts,
                     "invalid Codex timestamp"
                 );
                 continue;
@@ -253,7 +251,7 @@ impl LogAggregator {
                 id: uuid::Uuid::new_v4().to_string(),
                 harness: harness.to_string(),
                 timestamp,
-                content: content.to_string(),
+                content: row.feedback_log_body,
                 metadata: LogMetadata {
                     model: None,
                     provider: Some("openai".to_string()),
@@ -473,4 +471,44 @@ fn extract_inline_timestamp(line: &str, fallback: DateTime<Utc>) -> (DateTime<Ut
         }
     }
     (fallback, line)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn codex_sqlite_preserves_multiline_feedback_rows() {
+        if std::process::Command::new("sqlite3")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            return;
+        }
+
+        let path = std::env::temp_dir().join(format!(
+            "dreamseq-codex-sqlite-{}.sqlite",
+            uuid::Uuid::new_v4()
+        ));
+        let sql = "CREATE TABLE logs (ts INTEGER NOT NULL, feedback_log_body TEXT);\
+                   INSERT INTO logs VALUES (1710000000, 'first line\nsecond line\twith tab — done');";
+        let status = std::process::Command::new("sqlite3")
+            .arg(&path)
+            .arg(sql)
+            .status()
+            .expect("sqlite3 should create the fixture database");
+        assert!(status.success());
+
+        let result = LogAggregator::new().parse_codex_sqlite(&path, "codex");
+        let _ = std::fs::remove_file(&path);
+        let entries = result.expect("the multiline row should parse");
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            entries[0].content,
+            "first line\nsecond line\twith tab — done"
+        );
+        assert_eq!(entries[0].timestamp.timestamp(), 1_710_000_000);
+    }
 }

@@ -13,12 +13,12 @@ pub struct DreamseqConfig {
     pub anthologies_dir: PathBuf,
     pub enable_tts: bool,
     pub enable_kaptaind: bool,
-    /// Explicit consent to send redacted log excerpts to the configured Groq
-    /// endpoint. Remote analysis is disabled by default.
+    /// Explicit consent to send redacted log excerpts to Dreamsequence or a
+    /// configured BYOK inference endpoint. Remote analysis is disabled by default.
     #[serde(default)]
     pub allow_remote_analysis: bool,
-    /// Optional override for the Groq API base URL. Useful for testing against
-    /// a local mock server.
+    /// Legacy direct-provider override. It bypasses cloud routing and is kept
+    /// for compatibility and local integration tests.
     #[serde(default)]
     pub groq_base_url: Option<String>,
 }

@@ -3,6 +3,19 @@ use std::fs;
 use std::process::Command;
 
 #[test]
+fn auth_and_sync_commands_are_exposed() {
+    let output = Command::new(env!("CARGO_BIN_EXE_dreamseq"))
+        .arg("--help")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let help = String::from_utf8_lossy(&output.stdout);
+    for command in ["login", "logout", "sync"] {
+        assert!(help.contains(command), "missing {command} command: {help}");
+    }
+}
+
+#[test]
 fn run_and_report_are_read_only_for_dreams_by_default() {
     let root = std::env::temp_dir().join(format!("dreamseq-cli-{}", uuid::Uuid::new_v4()));
     fs::create_dir_all(&root).unwrap();

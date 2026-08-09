@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use colored::Colorize;
+use dreamseq::cloud::{CloudClient, CredentialStore};
 use dreamseq::present::{CompletionReport, HumanRenderer, JsonRenderer};
 use dreamseq::{Anthology, Dreamseq, DreamseqConfig, TrendAnalysis};
 use tracing_subscriber::EnvFilter;
@@ -32,6 +33,29 @@ enum Commands {
     },
     /// 🛠️ Initialize configuration
     Init,
+    /// 🔐 Pair this device with Dreamsequence
+    Login {
+        /// Dreamsequence service URL
+        #[arg(long)]
+        api_url: Option<String>,
+        /// Print the verification URL without opening a browser
+        #[arg(long)]
+        no_open: bool,
+    },
+    /// 🔓 Revoke this device and remove its local credential
+    Logout,
+    /// ☁️ Upload existing Dreamseq anthologies from output directories
+    Sync {
+        /// Directory to scan; repeat to include more than one directory
+        #[arg(long = "dir")]
+        directories: Vec<std::path::PathBuf>,
+        /// Path to configuration file
+        #[arg(short, long)]
+        config: Option<String>,
+        /// Emit the sync summary as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// 📋 Generate report from an existing anthology
     Report {
         /// Date of the anthology (YYYY-MM-DD)
@@ -94,6 +118,9 @@ async fn main() -> Result<()> {
 
             anthology.generate()?;
             let saved_path = anthology.save()?;
+            if let Err(error) = sync_if_paired(&anthology).await {
+                eprintln!("{} Cloud sync failed: {error}", "⚠️".yellow());
+            }
             let (dreams_roots, dreams_paths) = if publish_dreams {
                 save_dreams_to_speck_projects(&anthology)?
             } else {
@@ -139,6 +166,72 @@ async fn main() -> Result<()> {
                 "{} Add a Groq API key if you want remote semantic analysis.",
                 "💡".yellow()
             );
+        }
+        Commands::Login { api_url, no_open } => {
+            init_tracing(false);
+            let store = CredentialStore::discover()?;
+            let client = CloudClient::new(api_url.as_deref())?;
+            let credentials = client.pair(&store, !no_open).await?;
+            println!(
+                "{} Device paired with account {}.",
+                "✅".green(),
+                credentials.account_id.cyan()
+            );
+        }
+        Commands::Logout => {
+            init_tracing(false);
+            let store = CredentialStore::discover()?;
+            if let Some(credentials) = store.load_optional()? {
+                CloudClient::new(Some(&credentials.api_url))?
+                    .revoke(&credentials)
+                    .await?;
+                store.remove()?;
+                println!(
+                    "{} Device logged out and local credential removed.",
+                    "✅".green()
+                );
+            } else {
+                println!("{} This device is already logged out.", "ℹ️".blue());
+            }
+        }
+        Commands::Sync {
+            mut directories,
+            config,
+            json,
+        } => {
+            init_tracing(false);
+            let config = if let Some(config_path) = config {
+                DreamseqConfig::load_from_path(std::path::Path::new(&config_path))?
+            } else {
+                DreamseqConfig::load()?
+            };
+            if directories.is_empty() {
+                directories.push(config.anthologies_dir);
+                directories.push(config.output_dir);
+            }
+            directories.sort();
+            directories.dedup();
+            let credentials = CredentialStore::discover()?.load()?;
+            let client = CloudClient::new(Some(&credentials.api_url))?;
+            let summary = client.sync_directories(&credentials, &directories).await?;
+            if json {
+                println!("{}", serde_json::to_string(&summary)?);
+            } else {
+                println!(
+                    "{} Uploaded {} anthologies; skipped {} unrelated JSON files; {} failed.",
+                    if summary.failed == 0 {
+                        "✅".green()
+                    } else {
+                        "⚠️".yellow()
+                    },
+                    summary.uploaded,
+                    summary.skipped,
+                    summary.failed
+                );
+            }
+            if summary.failed > 0 {
+                anyhow::bail!("one or more anthologies could not be uploaded");
+            }
         }
         Commands::Report {
             date,
@@ -202,6 +295,16 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+async fn sync_if_paired(anthology: &Anthology) -> Result<()> {
+    let store = CredentialStore::discover()?;
+    let Some(credentials) = store.load_optional()? else {
+        return Ok(());
+    };
+    CloudClient::new(Some(&credentials.api_url))?
+        .upload(&credentials, anthology)
+        .await
 }
 
 fn make_relative_to(path: &std::path::Path, base: &std::path::Path) -> std::path::PathBuf {

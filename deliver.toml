@@ -9,6 +9,18 @@ required = true
 forbid_regex = ["TODO", "FIXME", "unimplemented!", "panic!"]
 
 [[file]]
+path = "src/cloud.rs"
+required = true
+forbid_regex = ["TODO", "FIXME", "unimplemented!", "panic!"]
+require_regex = ["CredentialStore", "device/authorize", "device/token", "api/v1/runs"]
+
+[[file]]
+path = "src/groq.rs"
+required = true
+forbid_regex = ["TODO", "FIXME", "unimplemented!", "panic!"]
+require_regex = ["api/v1/inference", "DREAMSEQ_BYOK_ROUTES", "request_openai_compatible", "request_cloud"]
+
+[[file]]
 path = "Cargo.toml"
 required = true
 

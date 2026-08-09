@@ -1,5 +1,6 @@
 pub mod aggregator;
 pub mod bound;
+pub mod cloud;
 pub mod config;
 pub mod groq;
 pub mod kaptaind;
@@ -42,7 +43,20 @@ impl Dreamseq {
         let groq_client = if let Some(base_url) = &config.groq_base_url {
             GroqClient::new_with_url(&config.groq_api_key, base_url)?
         } else {
-            GroqClient::new(&config.groq_api_key)?
+            let cloud = if std::env::var("DREAMSEQ_DISABLE_CLOUD_INFERENCE").as_deref() == Ok("1") {
+                None
+            } else {
+                match crate::cloud::CredentialStore::discover()
+                    .and_then(|store| store.load_optional())
+                {
+                    Ok(credentials) => credentials,
+                    Err(error) => {
+                        tracing::warn!(error = %error, "stored cloud credentials are unavailable; continuing with BYOK routes");
+                        None
+                    }
+                }
+            };
+            GroqClient::new_routed(&config.groq_api_key, cloud)?
         };
         let anthologies_dir = config.anthologies_dir.clone();
 
