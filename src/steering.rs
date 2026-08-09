@@ -3,6 +3,7 @@ use crate::segmentation::Segment;
 use anyhow::Result;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use std::sync::LazyLock;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SteeringEvent {
@@ -26,6 +27,82 @@ pub enum SteeringCategory {
     ManualRepetition,
     Other,
 }
+
+static MISSING_TOOL_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
+    vec![
+        Regex::new(r"i wish i had").unwrap(),
+        Regex::new(r"we need a tool for").unwrap(),
+        Regex::new(r"there should be a command").unwrap(),
+        Regex::new(r"missing.*tool").unwrap(),
+        Regex::new(r"would be nice if.*could").unwrap(),
+    ]
+});
+
+static MISSING_CONTEXT_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
+    vec![
+        Regex::new(r"we already decided").unwrap(),
+        Regex::new(r"you forgot").unwrap(),
+        Regex::new(r"as i mentioned").unwrap(),
+        Regex::new(r"remember that").unwrap(),
+        Regex::new(r"we discussed").unwrap(),
+        Regex::new(r"losing context").unwrap(),
+    ]
+});
+
+static WRONG_ABSTRACTION_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
+    vec![
+        Regex::new(r"that's not what i asked").unwrap(),
+        Regex::new(r"you're solving the wrong problem").unwrap(),
+        Regex::new(r"wrong approach").unwrap(),
+        Regex::new(r"not the right abstraction").unwrap(),
+        Regex::new(r"misunderstood the requirement").unwrap(),
+    ]
+});
+
+static EXCESS_VERBOSITY_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
+    vec![
+        Regex::new(r"be more concise").unwrap(),
+        Regex::new(r"too verbose").unwrap(),
+        Regex::new(r"\bshorter\b").unwrap(),
+        Regex::new(r"get to the point").unwrap(),
+        Regex::new(r"less detail").unwrap(),
+        Regex::new(r"keep it brief").unwrap(),
+    ]
+});
+
+static HALLUCINATION_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
+    vec![
+        Regex::new(r"that.*doesn't exist").unwrap(),
+        Regex::new(r"no such.*api").unwrap(),
+        Regex::new(r"that command doesn't").unwrap(),
+        Regex::new(r"\binvented\b").unwrap(),
+        Regex::new(r"\bhallucinated\b").unwrap(),
+        Regex::new(r"not a real").unwrap(),
+    ]
+});
+
+static ARCHITECTURAL_MISMATCH_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
+    vec![
+        Regex::new(r"doesn't fit the workflow").unwrap(),
+        Regex::new(r"architectural mismatch").unwrap(),
+        Regex::new(r"wrong for this use case").unwrap(),
+        Regex::new(r"doesn't scale").unwrap(),
+        Regex::new(r"not the right fit").unwrap(),
+    ]
+});
+
+static MANUAL_REPETITION_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
+    vec![
+        // Match "again" only when it's tied to an action, avoiding stray words
+        // like "... failed again" in telemetry noise.
+        Regex::new(r"\b(?:do|run|execute|perform|say|write|try)\s+(?:it|that|this)\s+again\b")
+            .unwrap(),
+        Regex::new(r"\brepeat(?:\s+(?:that|this|it|the\s+\w+))?\b").unwrap(),
+        Regex::new(r"\bsame as before\b").unwrap(),
+        Regex::new(r"\bdo it again\b").unwrap(),
+        Regex::new(r"\blike last time\b").unwrap(),
+    ]
+});
 
 pub struct SteeringDetector;
 
@@ -65,180 +142,62 @@ impl SteeringDetector {
         }
 
         // Check for various steering patterns
-        if let Some(category) = self.detect_missing_tool(&content) {
+        if matches_patterns(&content, &MISSING_TOOL_PATTERNS) {
             return Some(self.create_steering_event(
                 entry,
-                category,
+                SteeringCategory::MissingTool,
                 "User indicated missing tool or capability",
             ));
         }
 
-        if let Some(category) = self.detect_missing_context(&content) {
+        if matches_patterns(&content, &MISSING_CONTEXT_PATTERNS) {
             return Some(self.create_steering_event(
                 entry,
-                category,
+                SteeringCategory::MissingContext,
                 "Model forgot previous context or decisions",
             ));
         }
 
-        if let Some(category) = self.detect_wrong_abstraction(&content) {
+        if matches_patterns(&content, &WRONG_ABSTRACTION_PATTERNS) {
             return Some(self.create_steering_event(
                 entry,
-                category,
+                SteeringCategory::WrongAbstraction,
                 "Model solved the wrong problem",
             ));
         }
 
-        if let Some(category) = self.detect_excess_verbosity(&content) {
-            return Some(self.create_steering_event(entry, category, "User requested conciseness"));
-        }
-
-        if let Some(category) = self.detect_hallucination(&content) {
+        if matches_patterns(&content, &EXCESS_VERBOSITY_PATTERNS) {
             return Some(self.create_steering_event(
                 entry,
-                category,
+                SteeringCategory::ExcessVerbosity,
+                "User requested conciseness",
+            ));
+        }
+
+        if matches_patterns(&content, &HALLUCINATION_PATTERNS) {
+            return Some(self.create_steering_event(
+                entry,
+                SteeringCategory::Hallucination,
                 "Model invented API or command",
             ));
         }
 
-        if let Some(category) = self.detect_architectural_mismatch(&content) {
+        if matches_patterns(&content, &ARCHITECTURAL_MISMATCH_PATTERNS) {
             return Some(self.create_steering_event(
                 entry,
-                category,
+                SteeringCategory::ArchitecturalMismatch,
                 "Existing tool no longer fits workflow",
             ));
         }
 
-        if let Some(category) = self.detect_manual_repetition(&content) {
+        if matches_patterns(&content, &MANUAL_REPETITION_PATTERNS) {
             return Some(self.create_steering_event(
                 entry,
-                category,
+                SteeringCategory::ManualRepetition,
                 "User repeated same sequence manually",
             ));
         }
 
-        None
-    }
-
-    fn detect_missing_tool(&self, content: &str) -> Option<SteeringCategory> {
-        let patterns = [
-            r"i wish i had",
-            r"we need a tool for",
-            r"there should be a command",
-            r"missing.*tool",
-            r"would be nice if.*could",
-        ];
-
-        for pattern in &patterns {
-            if Regex::new(pattern).unwrap().is_match(content) {
-                return Some(SteeringCategory::MissingTool);
-            }
-        }
-        None
-    }
-
-    fn detect_missing_context(&self, content: &str) -> Option<SteeringCategory> {
-        let patterns = [
-            r"we already decided",
-            r"you forgot",
-            r"as i mentioned",
-            r"remember that",
-            r"we discussed",
-            r"losing context",
-        ];
-
-        for pattern in &patterns {
-            if Regex::new(pattern).unwrap().is_match(content) {
-                return Some(SteeringCategory::MissingContext);
-            }
-        }
-        None
-    }
-
-    fn detect_wrong_abstraction(&self, content: &str) -> Option<SteeringCategory> {
-        let patterns = [
-            r"that's not what i asked",
-            r"you're solving the wrong problem",
-            r"wrong approach",
-            r"not the right abstraction",
-            r"misunderstood the requirement",
-        ];
-
-        for pattern in &patterns {
-            if Regex::new(pattern).unwrap().is_match(content) {
-                return Some(SteeringCategory::WrongAbstraction);
-            }
-        }
-        None
-    }
-
-    fn detect_excess_verbosity(&self, content: &str) -> Option<SteeringCategory> {
-        let patterns = [
-            r"be more concise",
-            r"too verbose",
-            r"shorter",
-            r"get to the point",
-            r"less detail",
-            r"keep it brief",
-        ];
-
-        for pattern in &patterns {
-            if Regex::new(pattern).unwrap().is_match(content) {
-                return Some(SteeringCategory::ExcessVerbosity);
-            }
-        }
-        None
-    }
-
-    fn detect_hallucination(&self, content: &str) -> Option<SteeringCategory> {
-        let patterns = [
-            r"that.*doesn't exist",
-            r"no such.*api",
-            r"that command doesn't",
-            r"invented",
-            r"hallucinated",
-            r"not a real",
-        ];
-
-        for pattern in &patterns {
-            if Regex::new(pattern).unwrap().is_match(content) {
-                return Some(SteeringCategory::Hallucination);
-            }
-        }
-        None
-    }
-
-    fn detect_architectural_mismatch(&self, content: &str) -> Option<SteeringCategory> {
-        let patterns = [
-            r"doesn't fit the workflow",
-            r"architectural mismatch",
-            r"wrong for this use case",
-            r"doesn't scale",
-            r"not the right fit",
-        ];
-
-        for pattern in &patterns {
-            if Regex::new(pattern).unwrap().is_match(content) {
-                return Some(SteeringCategory::ArchitecturalMismatch);
-            }
-        }
-        None
-    }
-
-    fn detect_manual_repetition(&self, content: &str) -> Option<SteeringCategory> {
-        let patterns = [
-            r"again",
-            r"repeat",
-            r"same as before",
-            r"do it again",
-            r"like last time",
-        ];
-
-        for pattern in &patterns {
-            if Regex::new(pattern).unwrap().is_match(content) {
-                return Some(SteeringCategory::ManualRepetition);
-            }
-        }
         None
     }
 
@@ -271,6 +230,10 @@ impl SteeringDetector {
             SteeringCategory::Other => 0.5,
         }
     }
+}
+
+fn matches_patterns(content: &str, patterns: &[Regex]) -> bool {
+    patterns.iter().any(|pattern| pattern.is_match(content))
 }
 
 fn is_conversation_opener(content: &str) -> bool {

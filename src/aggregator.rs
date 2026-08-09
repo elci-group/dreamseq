@@ -1,9 +1,29 @@
 use crate::config::HarnessConfig;
 use anyhow::Result;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDateTime, Utc};
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use std::sync::LazyLock;
 use walkdir::WalkDir;
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct IngestionReport {
+    pub harnesses: Vec<HarnessIngestion>,
+    pub files_seen: usize,
+    pub files_failed: usize,
+    pub entries_accepted: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HarnessIngestion {
+    pub harness: String,
+    pub path: std::path::PathBuf,
+    pub files_seen: usize,
+    pub files_failed: usize,
+    pub entries_accepted: usize,
+    pub warnings: Vec<String>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogEntry {
@@ -31,6 +51,13 @@ pub struct ToolCall {
     pub duration_ms: Option<u64>,
 }
 
+static TIMESTAMP_PREFIX_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"^(?P<ts>\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)\s*(?P<rest>.*)$",
+    )
+    .expect("the built-in timestamp regex must compile")
+});
+
 pub struct LogAggregator;
 
 impl Default for LogAggregator {
@@ -45,38 +72,111 @@ impl LogAggregator {
     }
 
     pub async fn aggregate(&self, harnesses: &[HarnessConfig]) -> Result<Vec<LogEntry>> {
+        Ok(self.aggregate_with_report(harnesses).await?.0)
+    }
+
+    pub async fn aggregate_with_report(
+        &self,
+        harnesses: &[HarnessConfig],
+    ) -> Result<(Vec<LogEntry>, IngestionReport)> {
         let mut all_entries = Vec::new();
+        let mut report = IngestionReport::default();
 
         for harness in harnesses {
-            let entries = self.aggregate_harness(harness).await?;
+            let (entries, harness_report) = self.aggregate_harness(harness).await;
+            report.files_seen += harness_report.files_seen;
+            report.files_failed += harness_report.files_failed;
+            report.entries_accepted += harness_report.entries_accepted;
+            report.harnesses.push(harness_report);
             all_entries.extend(entries);
         }
 
         all_entries.sort_by_key(|e| e.timestamp);
-        Ok(all_entries)
+        Ok((all_entries, report))
     }
 
-    async fn aggregate_harness(&self, harness: &HarnessConfig) -> Result<Vec<LogEntry>> {
-        let mut entries = Vec::new();
-
+    async fn aggregate_harness(
+        &self,
+        harness: &HarnessConfig,
+    ) -> (Vec<LogEntry>, HarnessIngestion) {
+        let mut report = HarnessIngestion {
+            harness: harness.name.clone(),
+            path: harness.log_path.clone(),
+            files_seen: 0,
+            files_failed: 0,
+            entries_accepted: 0,
+            warnings: Vec::new(),
+        };
         if !harness.log_path.exists() {
-            tracing::warn!("Log path does not exist: {:?}", harness.log_path);
-            return Ok(entries);
+            let warning = format!("log path does not exist: {}", harness.log_path.display());
+            tracing::warn!(
+                harness = %harness.name,
+                path = %harness.log_path.display(),
+                "log path does not exist"
+            );
+            report.warnings.push(warning);
+            return (Vec::new(), report);
         }
 
+        if matches!(harness.log_format, crate::config::LogFormat::Bound) {
+            report.files_seen = 1;
+            return match crate::bound::aggregate_bound_harness(harness).await {
+                Ok(entries) => {
+                    report.entries_accepted = entries.len();
+                    (entries, report)
+                }
+                Err(error) => {
+                    report.files_failed = 1;
+                    report.warnings.push(error.to_string());
+                    tracing::error!(
+                        harness = %harness.name,
+                        path = %harness.log_path.display(),
+                        error = %error,
+                        "Bound ingestion failed"
+                    );
+                    (Vec::new(), report)
+                }
+            };
+        }
+
+        let mut entries = Vec::new();
         for entry in WalkDir::new(&harness.log_path)
-            .follow_links(true)
+            .follow_links(false)
             .into_iter()
-            .filter_map(|e| e.ok())
         {
-            if entry.file_type().is_file()
-                && let Ok(log_entries) = self.parse_log_file(entry.path(), harness).await
-            {
-                entries.extend(log_entries);
+            match entry {
+                Ok(entry) if entry.file_type().is_file() => {
+                    report.files_seen += 1;
+                    match self.parse_log_file(entry.path(), harness).await {
+                        Ok(log_entries) => entries.extend(log_entries),
+                        Err(error) => {
+                            report.files_failed += 1;
+                            let warning = format!("{}: {error}", entry.path().display());
+                            report.warnings.push(warning);
+                            tracing::error!(
+                                harness = %harness.name,
+                                path = %entry.path().display(),
+                                error = %error,
+                                "failed to parse log file"
+                            );
+                        }
+                    }
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    report.files_failed += 1;
+                    report.warnings.push(error.to_string());
+                    tracing::error!(
+                        harness = %harness.name,
+                        error = %error,
+                        "failed to traverse log source"
+                    );
+                }
             }
         }
 
-        Ok(entries)
+        report.entries_accepted = entries.len();
+        (entries, report)
     }
 
     async fn parse_log_file(&self, path: &Path, harness: &HarnessConfig) -> Result<Vec<LogEntry>> {
@@ -84,13 +184,19 @@ impl LogAggregator {
             crate::config::LogFormat::CodexSqlite => self.parse_codex_sqlite(path, &harness.name),
             format => {
                 let content = std::fs::read_to_string(path)?;
+                let fallback_timestamp = file_timestamp(path);
                 match format {
-                    crate::config::LogFormat::Json => self.parse_json_logs(&content, &harness.name),
-                    crate::config::LogFormat::Markdown => {
-                        self.parse_markdown_logs(&content, &harness.name)
+                    crate::config::LogFormat::Json => {
+                        self.parse_json_logs(&content, &harness.name, fallback_timestamp)
                     }
-                    crate::config::LogFormat::Plain | crate::config::LogFormat::Custom(_) => {
-                        self.parse_plain_logs(&content, &harness.name)
+                    crate::config::LogFormat::Markdown => {
+                        self.parse_markdown_logs(&content, &harness.name, fallback_timestamp)
+                    }
+                    crate::config::LogFormat::Plain => {
+                        self.parse_plain_logs(&content, &harness.name, fallback_timestamp)
+                    }
+                    crate::config::LogFormat::Bound => {
+                        unreachable!("Bound harnesses are handled directly in aggregate_harness")
                     }
                     crate::config::LogFormat::CodexSqlite => unreachable!(),
                 }
@@ -99,6 +205,17 @@ impl LogAggregator {
     }
 
     fn parse_codex_sqlite(&self, path: &Path, harness: &str) -> Result<Vec<LogEntry>> {
+        if std::process::Command::new("sqlite3")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            anyhow::bail!(
+                "sqlite3 is unavailable; cannot ingest Codex SQLite source {}",
+                path.display()
+            );
+        }
+
         let output = std::process::Command::new("sqlite3")
             .args(["-separator", "\t"])
             .arg(path)
@@ -110,122 +227,250 @@ impl LogAggregator {
                 String::from_utf8_lossy(&output.stderr)
             );
         }
-        Ok(String::from_utf8_lossy(&output.stdout)
-            .lines()
-            .filter_map(|line| {
-                let (seconds, content) = line.split_once('\t')?;
-                let timestamp = seconds
-                    .parse::<i64>()
-                    .ok()
-                    .and_then(|value| chrono::DateTime::from_timestamp(value, 0))?;
-                Some(LogEntry {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    harness: harness.to_string(),
-                    timestamp,
-                    content: content.to_string(),
-                    metadata: LogMetadata {
-                        model: None,
-                        provider: Some("openai".to_string()),
-                        tool_calls: vec![],
-                        user_messages: 0,
-                        assistant_messages: 0,
-                    },
-                })
-            })
-            .collect())
+        let mut entries = Vec::new();
+        for (line_number, line) in String::from_utf8_lossy(&output.stdout).lines().enumerate() {
+            let Some((seconds, content)) = line.split_once('\t') else {
+                tracing::warn!(harness, line_number, "invalid Codex SQLite row");
+                continue;
+            };
+            let timestamp = match seconds.parse::<i64>() {
+                Ok(value) => chrono::DateTime::from_timestamp(value, 0),
+                Err(error) => {
+                    tracing::warn!(harness, line_number, timestamp = seconds, error = %error, "invalid Codex timestamp");
+                    None
+                }
+            };
+            let Some(timestamp) = timestamp else {
+                tracing::warn!(
+                    harness,
+                    line_number,
+                    timestamp = seconds,
+                    "invalid Codex timestamp"
+                );
+                continue;
+            };
+            entries.push(LogEntry {
+                id: uuid::Uuid::new_v4().to_string(),
+                harness: harness.to_string(),
+                timestamp,
+                content: content.to_string(),
+                metadata: LogMetadata {
+                    model: None,
+                    provider: Some("openai".to_string()),
+                    tool_calls: vec![],
+                    user_messages: 0,
+                    assistant_messages: 0,
+                },
+            });
+        }
+        Ok(entries)
     }
 
-    fn parse_json_logs(&self, content: &str, harness: &str) -> Result<Vec<LogEntry>> {
+    fn parse_json_logs(
+        &self,
+        content: &str,
+        harness: &str,
+        fallback_timestamp: DateTime<Utc>,
+    ) -> Result<Vec<LogEntry>> {
         if let Ok(values) = serde_json::from_str::<Vec<serde_json::Value>>(content) {
             return Ok(values
                 .into_iter()
-                .filter_map(|value| self.json_to_log_entry(value, harness).ok())
+                .map(|value| self.json_to_log_entry(value, harness, fallback_timestamp))
                 .collect());
         }
 
         let mut entries = Vec::new();
+        let mut rejected = 0usize;
 
-        for line in content.lines() {
-            if let Ok(entry) = serde_json::from_str::<serde_json::Value>(line)
-                && let Ok(log_entry) = self.json_to_log_entry(entry, harness)
-            {
-                entries.push(log_entry);
+        for (line_number, line) in content.lines().enumerate() {
+            if line.trim().is_empty() {
+                continue;
             }
+            match serde_json::from_str::<serde_json::Value>(line) {
+                Ok(entry) => {
+                    entries.push(self.json_to_log_entry(entry, harness, fallback_timestamp))
+                }
+                Err(error) => {
+                    rejected += 1;
+                    tracing::warn!(
+                        harness,
+                        line_number = line_number + 1,
+                        error = %error,
+                        "rejected malformed JSON log record"
+                    );
+                }
+            }
+        }
+
+        if entries.is_empty() && rejected > 0 {
+            anyhow::bail!("no valid JSON records; rejected {rejected} malformed records");
         }
 
         Ok(entries)
     }
 
-    fn json_to_log_entry(&self, value: serde_json::Value, harness: &str) -> Result<LogEntry> {
-        Ok(LogEntry {
+    fn json_to_log_entry(
+        &self,
+        value: serde_json::Value,
+        harness: &str,
+        fallback_timestamp: DateTime<Utc>,
+    ) -> LogEntry {
+        LogEntry {
             id: uuid::Uuid::new_v4().to_string(),
             harness: harness.to_string(),
-            timestamp: value["timestamp"]
-                .as_str()
-                .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
-                .map(|dt| dt.with_timezone(&Utc))
-                .unwrap_or_else(Utc::now),
-            content: value["content"].as_str().unwrap_or("").to_string(),
+            timestamp: parse_json_timestamp(&value["timestamp"])
+                .or_else(|| parse_json_timestamp(&value["ts"]))
+                .unwrap_or(fallback_timestamp),
+            content: extract_json_content(&value),
             metadata: LogMetadata {
                 model: value["model"].as_str().map(String::from),
                 provider: value["provider"].as_str().map(String::from),
-                tool_calls: vec![],
+                tool_calls: parse_tool_calls(&value["tool_calls"]),
                 user_messages: value["user_messages"].as_u64().unwrap_or(0) as usize,
                 assistant_messages: value["assistant_messages"].as_u64().unwrap_or(0) as usize,
             },
+        }
+    }
+
+    fn parse_markdown_logs(
+        &self,
+        content: &str,
+        harness: &str,
+        fallback_time: DateTime<Utc>,
+    ) -> Result<Vec<LogEntry>> {
+        let mut entries = Vec::new();
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+            let (timestamp, content) = extract_inline_timestamp(trimmed, fallback_time);
+            entries.push(LogEntry {
+                id: uuid::Uuid::new_v4().to_string(),
+                harness: harness.to_string(),
+                timestamp,
+                content: content.to_string(),
+                metadata: LogMetadata {
+                    model: None,
+                    provider: None,
+                    tool_calls: vec![],
+                    user_messages: 0,
+                    assistant_messages: 0,
+                },
+            });
+        }
+
+        Ok(entries)
+    }
+
+    fn parse_plain_logs(
+        &self,
+        content: &str,
+        harness: &str,
+        fallback_time: DateTime<Utc>,
+    ) -> Result<Vec<LogEntry>> {
+        let mut entries = Vec::new();
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let (timestamp, content) = extract_inline_timestamp(trimmed, fallback_time);
+            entries.push(LogEntry {
+                id: uuid::Uuid::new_v4().to_string(),
+                harness: harness.to_string(),
+                timestamp,
+                content: content.to_string(),
+                metadata: LogMetadata {
+                    model: None,
+                    provider: None,
+                    tool_calls: vec![],
+                    user_messages: 0,
+                    assistant_messages: 0,
+                },
+            });
+        }
+
+        Ok(entries)
+    }
+}
+
+fn file_timestamp(path: &Path) -> DateTime<Utc> {
+    match std::fs::metadata(path).and_then(|metadata| metadata.modified()) {
+        Ok(timestamp) => DateTime::<Utc>::from(timestamp),
+        Err(error) => {
+            tracing::warn!(path = %path.display(), error = %error, "using Unix epoch for log file timestamp");
+            DateTime::<Utc>::UNIX_EPOCH
+        }
+    }
+}
+
+fn parse_json_timestamp(value: &serde_json::Value) -> Option<DateTime<Utc>> {
+    if let Some(text) = value.as_str() {
+        return DateTime::parse_from_rfc3339(text)
+            .map(|dt| dt.with_timezone(&Utc))
+            .inspect_err(|error| {
+                tracing::warn!(timestamp = text, error = %error, "invalid JSON timestamp");
+            })
+            .ok();
+    }
+    if let Some(seconds) = value.as_i64() {
+        // Heuristic: values larger than 1e12 are milliseconds.
+        if seconds > 1_000_000_000_000 {
+            return DateTime::from_timestamp_millis(seconds).map(|dt| dt.with_timezone(&Utc));
+        }
+        return DateTime::from_timestamp(seconds, 0).map(|dt| dt.with_timezone(&Utc));
+    }
+    None
+}
+
+fn extract_json_content(value: &serde_json::Value) -> String {
+    for field in ["content", "message", "text", "body", "msg"] {
+        if let Some(text) = value.get(field).and_then(|v| v.as_str()) {
+            return text.to_string();
+        }
+    }
+    String::new()
+}
+
+fn parse_tool_calls(value: &serde_json::Value) -> Vec<ToolCall> {
+    value
+        .as_array()
+        .map(|array| {
+            array
+                .iter()
+                .filter_map(|item| {
+                    Some(ToolCall {
+                        tool_name: item["tool_name"].as_str()?.to_string(),
+                        parameters: item["parameters"].clone(),
+                        result: item.get("result").cloned(),
+                        duration_ms: item["duration_ms"].as_u64(),
+                    })
+                })
+                .collect()
         })
-    }
+        .unwrap_or_default()
+}
 
-    fn parse_markdown_logs(&self, content: &str, harness: &str) -> Result<Vec<LogEntry>> {
-        // Simple markdown parser - looks for code blocks and timestamps
-        let mut entries = Vec::new();
-        let current_time = Utc::now();
+fn extract_inline_timestamp(line: &str, fallback: DateTime<Utc>) -> (DateTime<Utc>, &str) {
+    if let Some(captures) = TIMESTAMP_PREFIX_RE.captures(line) {
+        let Some(ts_match) = captures.name("ts") else {
+            return (fallback, line);
+        };
+        let ts_str = ts_match.as_str();
+        let rest = captures.name("rest").map(|m| m.as_str()).unwrap_or("");
 
-        // For now, treat each line as a potential entry
-        // In production, this would be more sophisticated
-        for line in content.lines() {
-            if !line.trim().is_empty() {
-                entries.push(LogEntry {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    harness: harness.to_string(),
-                    timestamp: current_time,
-                    content: line.to_string(),
-                    metadata: LogMetadata {
-                        model: None,
-                        provider: None,
-                        tool_calls: vec![],
-                        user_messages: 0,
-                        assistant_messages: 0,
-                    },
-                });
-            }
+        if let Ok(dt) = DateTime::parse_from_rfc3339(ts_str) {
+            return (dt.with_timezone(&Utc), rest);
         }
-
-        Ok(entries)
-    }
-
-    fn parse_plain_logs(&self, content: &str, harness: &str) -> Result<Vec<LogEntry>> {
-        let mut entries = Vec::new();
-        let current_time = Utc::now();
-
-        for line in content.lines() {
-            if !line.trim().is_empty() {
-                entries.push(LogEntry {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    harness: harness.to_string(),
-                    timestamp: current_time,
-                    content: line.to_string(),
-                    metadata: LogMetadata {
-                        model: None,
-                        provider: None,
-                        tool_calls: vec![],
-                        user_messages: 0,
-                        assistant_messages: 0,
-                    },
-                });
-            }
+        if let Ok(naive) = NaiveDateTime::parse_from_str(ts_str, "%Y-%m-%d %H:%M:%S") {
+            return (naive.and_utc(), rest);
         }
-
-        Ok(entries)
+        if let Ok(naive) = NaiveDateTime::parse_from_str(ts_str, "%Y-%m-%dT%H:%M:%S") {
+            return (naive.and_utc(), rest);
+        }
     }
+    (fallback, line)
 }

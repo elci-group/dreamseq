@@ -1,6 +1,5 @@
 use crate::aggregator::LogEntry;
 use anyhow::Result;
-use std::collections::HashSet;
 
 pub struct Normalizer;
 
@@ -16,36 +15,27 @@ impl Normalizer {
     }
 
     pub fn normalize(&self, entries: Vec<LogEntry>) -> Result<Vec<LogEntry>> {
+        let original_len = entries.len();
         let mut normalized = Vec::new();
-        let mut seen = HashSet::new();
+        let mut empty = 0usize;
         for entry in entries {
             let normalized_entry = self.normalize_entry(entry);
             if normalized_entry.content.is_empty() {
+                empty += 1;
                 continue;
             }
-            // Remove duplicates based on content fingerprint
-            let fingerprint = self.content_fingerprint(&normalized_entry.content);
-
-            if seen.contains(&fingerprint) {
-                continue;
-            }
-            seen.insert(fingerprint.clone());
-
-            // Normalize timestamp
+            // Repeated entries are evidence for repetition and steering
+            // frequency. Keep each occurrence, including its timestamp,
+            // harness, model metadata, and tool-call provenance.
             normalized.push(normalized_entry);
         }
 
         tracing::info!(
-            "Removed {} duplicate entries",
-            seen.len().saturating_sub(normalized.len())
+            "Normalized {} entries: retained repeated evidence and removed {} empty entries",
+            original_len,
+            empty
         );
         Ok(normalized)
-    }
-
-    fn content_fingerprint(&self, content: &str) -> String {
-        // Simple fingerprinting - lowercase and trim
-        // In production, this would use hashing
-        content.trim().to_lowercase()
     }
 
     fn normalize_entry(&self, mut entry: LogEntry) -> LogEntry {
@@ -66,22 +56,7 @@ impl Normalizer {
     }
 
     fn remove_noise(&self, content: &str) -> String {
-        // Remove common noise patterns
-        let noise_patterns = [
-            r"\[system\]", // System messages
-            r"\[debug\]",  // Debug messages
-            r"^\s*$",      // Empty lines
-        ];
-
-        let mut result = content.to_string();
-        for pattern in &noise_patterns {
-            result = regex::Regex::new(pattern)
-                .unwrap()
-                .replace_all(&result, "")
-                .to_string();
-        }
-
-        result
+        content.replace("[system]", "").replace("[debug]", "")
     }
 
     fn normalize_tool_calls(
