@@ -152,6 +152,14 @@ impl LogAggregator {
         {
             match entry {
                 Ok(entry) if entry.file_type().is_file() => {
+                    if is_binary_artifact(entry.path(), &harness.log_format) {
+                        tracing::debug!(
+                            harness = %harness.name,
+                            path = %entry.path().display(),
+                            "skipping known binary log artifact"
+                        );
+                        continue;
+                    }
                     report.files_seen += 1;
                     match self.parse_log_file(entry.path(), harness).await {
                         Ok(log_entries) => entries.extend(log_entries),
@@ -395,6 +403,20 @@ impl LogAggregator {
     }
 }
 
+fn is_binary_artifact(path: &Path, format: &crate::config::LogFormat) -> bool {
+    if matches!(format, crate::config::LogFormat::CodexSqlite) {
+        return false;
+    }
+
+    let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    let file_name = file_name.to_ascii_lowercase();
+    [".db", ".db-wal", ".db-shm", ".pb"]
+        .iter()
+        .any(|suffix| file_name.ends_with(suffix))
+}
+
 fn file_timestamp(path: &Path) -> DateTime<Utc> {
     match std::fs::metadata(path).and_then(|metadata| metadata.modified()) {
         Ok(timestamp) => DateTime::<Utc>::from(timestamp),
@@ -510,5 +532,17 @@ mod tests {
             "first line\nsecond line\twith tab — done"
         );
         assert_eq!(entries[0].timestamp.timestamp(), 1_710_000_000);
+    }
+
+    #[test]
+    fn skips_known_binary_artifacts_for_text_formats() {
+        use crate::config::LogFormat;
+
+        for name in ["conversation.db", "conversation.db-wal", "conversation.db-shm", "conversation.pb"] {
+            assert!(is_binary_artifact(Path::new(name), &LogFormat::Plain));
+            assert!(is_binary_artifact(Path::new(name), &LogFormat::Json));
+        }
+        assert!(!is_binary_artifact(Path::new("conversation.log"), &LogFormat::Plain));
+        assert!(!is_binary_artifact(Path::new("conversation.db"), &LogFormat::CodexSqlite));
     }
 }
