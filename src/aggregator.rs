@@ -538,11 +538,56 @@ mod tests {
     fn skips_known_binary_artifacts_for_text_formats() {
         use crate::config::LogFormat;
 
-        for name in ["conversation.db", "conversation.db-wal", "conversation.db-shm", "conversation.pb"] {
+        for name in [
+            "conversation.db",
+            "conversation.db-wal",
+            "conversation.db-shm",
+            "conversation.pb",
+        ] {
             assert!(is_binary_artifact(Path::new(name), &LogFormat::Plain));
             assert!(is_binary_artifact(Path::new(name), &LogFormat::Json));
         }
-        assert!(!is_binary_artifact(Path::new("conversation.log"), &LogFormat::Plain));
-        assert!(!is_binary_artifact(Path::new("conversation.db"), &LogFormat::CodexSqlite));
+        assert!(!is_binary_artifact(
+            Path::new("conversation.log"),
+            &LogFormat::Plain
+        ));
+        assert!(!is_binary_artifact(
+            Path::new("conversation.db"),
+            &LogFormat::CodexSqlite
+        ));
+    }
+
+    #[tokio::test]
+    async fn ignores_database_artifacts_during_plain_ingestion() {
+        let root = std::env::temp_dir().join(format!(
+            "dreamseq-gemini-artifacts-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("conversation"), "a valid text entry\n").unwrap();
+        for name in [
+            "conversation.db",
+            "conversation.db-wal",
+            "conversation.db-shm",
+            "conversation.pb",
+        ] {
+            std::fs::write(root.join(name), [0, 159, 146, 150]).unwrap();
+        }
+
+        let (entries, report) = LogAggregator::new()
+            .aggregate_with_report(&[crate::config::HarnessConfig {
+                name: "gemini".to_string(),
+                log_path: root.clone(),
+                log_format: crate::config::LogFormat::Plain,
+                bound_filter: None,
+            }])
+            .await
+            .unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(report.files_seen, 1);
+        assert_eq!(report.files_failed, 0);
+        assert!(report.harnesses[0].warnings.is_empty());
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
