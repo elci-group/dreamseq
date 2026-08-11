@@ -848,15 +848,25 @@ fn coerce_analysis_scalars(value: &mut serde_json::Value) {
 }
 
 fn normalize_analysis_json(input: &str) -> String {
-    static NUMERIC_WORD: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-        regex::Regex::new(
-                r#"(?i)(?:\"|')?(frequency|severity|estimated_value|time_impact_minutes|estimated_time_saved|confidence)(?:\"|')?\s*:\s*([a-z]+)"#,
+    static NUMERIC_VALUE: std::sync::LazyLock<regex::Regex> =
+        std::sync::LazyLock::new(|| {
+            regex::Regex::new(
+                r#"(?i)(?:\"(frequency|severity|estimated_value|time_impact_minutes|estimated_time_saved|confidence)\"|(frequency|severity|estimated_value|time_impact_minutes|estimated_time_saved|confidence))\s*:\s*(?:\"[^\"]*\"|'[^']*'|[^,}\n]+)"#,
             )
             .expect("numeric analysis field regex must compile")
-    });
-    NUMERIC_WORD
+        });
+    NUMERIC_VALUE
         .replace_all(input, |captures: &regex::Captures<'_>| {
-            format!("\"{}\":\"{}\"", &captures[1], &captures[2])
+            let field = captures
+                .get(1)
+                .or_else(|| captures.get(2))
+                .map(|match_| match_.as_str())
+                .unwrap_or("frequency");
+            let full = captures.get(0).map(|match_| match_.as_str()).unwrap_or_default();
+            let raw_value = full.split_once(':').map(|(_, value)| value).unwrap_or_default();
+            let number = parse_numeric_string(raw_value.trim().trim_matches(['\"', '\'']))
+                .unwrap_or(0.0);
+            format!("\"{field}\":{number}")
         })
         .into_owned()
 }
@@ -877,7 +887,11 @@ fn parse_numeric_string(value: &str) -> Option<f64> {
     if leading_digits.is_some() {
         return leading_digits;
     }
-    match normalized.as_str() {
+    let leading_word = normalized
+        .split(|character: char| !character.is_ascii_alphabetic())
+        .find(|part| !part.is_empty())
+        .unwrap_or_default();
+    match leading_word {
         "zero" => Some(0.0),
         "one" => Some(1.0),
         "two" => Some(2.0),
