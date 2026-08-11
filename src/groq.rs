@@ -259,7 +259,9 @@ impl GroqClient {
                 messages: messages.clone(),
                 temperature: 0.3,
                 max_tokens: 4000,
-                response_format: ResponseFormat { r#type: "json_object" },
+                response_format: ResponseFormat {
+                    r#type: "json_object",
+                },
             };
             match self.request_cloud(credentials, &request).await {
                 Ok(output) => match self.parse_analysis(&output.content) {
@@ -285,7 +287,9 @@ impl GroqClient {
                 messages: messages.clone(),
                 temperature: 0.3,
                 max_tokens: 4000,
-                response_format: ResponseFormat { r#type: "json_object" },
+                response_format: ResponseFormat {
+                    r#type: "json_object",
+                },
             };
             match self.request_openai_compatible(route, &request).await {
                 Ok(output) => match self.parse_analysis(&output.content) {
@@ -811,7 +815,10 @@ fn coerce_analysis_scalars(value: &mut serde_json::Value) {
                     if let Some(number) = parse_numeric_string(child.as_str().unwrap_or_default()) {
                         *child = serde_json::json!(number);
                     }
-                } else if TEXT_FIELDS.contains(&key.as_str()) && !child.is_string() && !child.is_null() {
+                } else if TEXT_FIELDS.contains(&key.as_str())
+                    && !child.is_string()
+                    && !child.is_null()
+                {
                     let replacement = match &*child {
                         serde_json::Value::Number(number) => number.to_string(),
                         serde_json::Value::Bool(boolean) => boolean.to_string(),
