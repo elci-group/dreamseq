@@ -178,6 +178,7 @@ impl GroqClient {
         Ok(Self {
             client: Client::builder()
                 .timeout(Duration::from_secs(120))
+                .no_proxy()
                 .build()?,
             cloud: None,
             routes: vec![InferenceRoute {
@@ -200,6 +201,7 @@ impl GroqClient {
                 .timeout(Duration::from_secs(5))
                 .pool_idle_timeout(Duration::from_millis(0))
                 .pool_max_idle_per_host(0)
+                .no_proxy()
                 .build()?,
             cloud,
             routes: vec![InferenceRoute {

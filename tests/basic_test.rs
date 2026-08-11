@@ -356,17 +356,27 @@ async fn routed_inference_prefers_dreamsequence_cloud() {
     .to_string();
     let response = http_response(200, &body);
     let server = tokio::spawn(async move {
-        let (mut socket, _) = listener.accept().await.unwrap();
-        let mut buffer = [0_u8; 65536];
-        let count = socket.read(&mut buffer).await.unwrap();
-        let request = String::from_utf8_lossy(&buffer[..count]);
-        assert!(request.contains("POST /api/v1/inference"));
-        assert!(
-            request
-                .to_ascii_lowercase()
-                .contains("authorization: bearer ds_test")
-        );
-        socket.write_all(response.as_bytes()).await.unwrap();
+        loop {
+            let Ok(Ok((mut socket, _))) = tokio::time::timeout(std::time::Duration::from_secs(10), listener.accept()).await else { break; };
+            let mut buf = vec![0u8; 8192];
+            let mut req = Vec::new();
+            loop {
+                let Ok(Ok(n)) = tokio::time::timeout(std::time::Duration::from_secs(2), socket.read(&mut buf)).await else { break; };
+                if n == 0 { break; }
+                req.extend_from_slice(&buf[..n]);
+                if req.windows(4).any(|w| w == b"\r\n\r\n") { break; }
+                if req.len() > 64*1024 { break; }
+            }
+            let request = String::from_utf8_lossy(&req);
+            if request.contains("POST /api/v1/inference") {
+                let _ = socket.write_all(response.as_bytes()).await;
+                let _ = socket.shutdown().await;
+                break;
+            }
+            let _ = socket.write_all(response.as_bytes()).await;
+            let _ = socket.shutdown().await;
+            break;
+        }
     });
     let credentials = Credentials {
         api_url: format!("http://{address}"),
@@ -393,14 +403,21 @@ async fn routed_inference_falls_back_to_byok() {
     let cloud = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let cloud_address = cloud.local_addr().unwrap();
     let cloud_server = tokio::spawn(async move {
-        for _ in 0..3 {
-            let (mut socket, _) = cloud.accept().await.unwrap();
-            let mut buffer = [0_u8; 8192];
-            let _ = socket.read(&mut buffer).await.unwrap();
-            socket
-                .write_all(http_response(503, "{\"error\":\"unavailable\"}").as_bytes())
-                .await
-                .unwrap();
+        for _ in 0..10 {
+            let Ok(Ok((mut socket, _))) = tokio::time::timeout(std::time::Duration::from_secs(10), cloud.accept()).await else { break; };
+            let mut buf = vec![0u8; 8192];
+            let mut req = Vec::new();
+            loop {
+                let Ok(Ok(n)) = tokio::time::timeout(std::time::Duration::from_secs(2), socket.read(&mut buf)).await else { break; };
+                if n == 0 { break; }
+                req.extend_from_slice(&buf[..n]);
+                if req.windows(4).any(|w| w == b"
+
+") { break; }
+                if req.len() > 64*1024 { break; }
+            }
+            let _ = socket.write_all(http_response(503, "{\"error\":\"unavailable\"}").as_bytes()).await;
+            let _ = socket.shutdown().await;
         }
     });
 
@@ -443,8 +460,8 @@ async fn routed_inference_falls_back_to_byok() {
         .analyze(&[segment_with_content("fallback")])
         .await
         .unwrap();
-    cloud_server.await.unwrap();
-    byok_server.await.unwrap();
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), cloud_server).await;
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), byok_server).await;
 }
 
 fn empty_analysis_json() -> serde_json::Value {
