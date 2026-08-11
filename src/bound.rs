@@ -54,7 +54,24 @@ impl BoundClient {
             anyhow::bail!("bound binary not found for harness {}", harness.name);
         }
 
-        let output_path = std::env::temp_dir().join(format!("bound-{}.json", uuid::Uuid::new_v4()));
+        // Use a private temp directory (0700) to avoid symlink races on
+        // world-writable /tmp. Bound writes inside; we clean the directory.
+        let temp_dir = std::env::temp_dir().join(format!(
+            "dreamseq-bound-{}",
+            uuid::Uuid::new_v4()
+        ));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt;
+            std::fs::DirBuilder::new()
+                .mode(0o700)
+                .create(&temp_dir)?;
+        }
+        #[cfg(not(unix))]
+        {
+            std::fs::create_dir_all(&temp_dir)?;
+        }
+        let output_path = temp_dir.join("out.json");
         let output_path_str = output_path.to_string_lossy().to_string();
 
         let mut command = std::process::Command::new(&binary);
@@ -71,17 +88,17 @@ impl BoundClient {
 
         let status = command.status()?;
         if !status.success() {
-            if let Err(error) = std::fs::remove_file(&output_path)
+            if let Err(error) = std::fs::remove_dir_all(&temp_dir)
                 && error.kind() != std::io::ErrorKind::NotFound
             {
-                tracing::warn!(path = %output_path.display(), error = %error, "failed to remove Bound output after command failure");
+                tracing::warn!(path = %temp_dir.display(), error = %error, "failed to remove Bound temp dir after command failure");
             }
             anyhow::bail!("bound failed for harness {}", harness.name);
         }
 
         let content_result = std::fs::read_to_string(&output_path);
-        if let Err(error) = std::fs::remove_file(&output_path) {
-            tracing::warn!(path = %output_path.display(), error = %error, "failed to remove temporary Bound output");
+        if let Err(error) = std::fs::remove_dir_all(&temp_dir) {
+            tracing::warn!(path = %temp_dir.display(), error = %error, "failed to remove temporary Bound output");
         }
         let content = content_result?;
 

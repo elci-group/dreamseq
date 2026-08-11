@@ -498,7 +498,8 @@ impl Anthology {
         let filepath = self.config.anthologies_dir.join(filename);
 
         let content = serde_json::to_string_pretty(self)?;
-        fs::write(&filepath, content)?;
+        write_private(&filepath, content.as_bytes())?;
+        set_private_permissions(&filepath)?;
 
         tracing::info!("Saved anthology to {:?}", filepath);
         Ok(filepath)
