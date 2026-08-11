@@ -356,27 +356,13 @@ async fn routed_inference_prefers_dreamsequence_cloud() {
     .to_string();
     let response = http_response(200, &body);
     let server = tokio::spawn(async move {
-        loop {
-            let Ok(Ok((mut socket, _))) = tokio::time::timeout(std::time::Duration::from_secs(10), listener.accept()).await else { break; };
-            let mut buf = vec![0u8; 8192];
-            let mut req = Vec::new();
-            loop {
-                let Ok(Ok(n)) = tokio::time::timeout(std::time::Duration::from_secs(2), socket.read(&mut buf)).await else { break; };
-                if n == 0 { break; }
-                req.extend_from_slice(&buf[..n]);
-                if req.windows(4).any(|w| w == b"\r\n\r\n") { break; }
-                if req.len() > 64*1024 { break; }
-            }
-            let request = String::from_utf8_lossy(&req);
-            if request.contains("POST /api/v1/inference") {
-                let _ = socket.write_all(response.as_bytes()).await;
-                let _ = socket.shutdown().await;
-                break;
-            }
-            let _ = socket.write_all(response.as_bytes()).await;
-            let _ = socket.shutdown().await;
-            break;
-        }
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut buffer = [0_u8; 65536];
+        let count = socket.read(&mut buffer).await.unwrap();
+        let request = String::from_utf8_lossy(&buffer[..count]);
+        assert!(request.contains("POST /api/v1/inference"));
+        let _ = socket.write_all(response.as_bytes()).await;
+        let _ = socket.shutdown().await;
     });
     let credentials = Credentials {
         api_url: format!("http://{address}"),
