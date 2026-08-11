@@ -848,13 +848,12 @@ fn coerce_analysis_scalars(value: &mut serde_json::Value) {
 }
 
 fn normalize_analysis_json(input: &str) -> String {
-    static NUMERIC_VALUE: std::sync::LazyLock<regex::Regex> =
-        std::sync::LazyLock::new(|| {
-            regex::Regex::new(
+    static NUMERIC_VALUE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(
                 r#"(?i)(?:\"(frequency|severity|estimated_value|time_impact_minutes|estimated_time_saved|confidence)\"|(frequency|severity|estimated_value|time_impact_minutes|estimated_time_saved|confidence))\s*:\s*(?:\"[^\"]*\"|'[^']*'|[^,}\n]+)"#,
             )
             .expect("numeric analysis field regex must compile")
-        });
+    });
     NUMERIC_VALUE
         .replace_all(input, |captures: &regex::Captures<'_>| {
             let field = captures
@@ -862,10 +861,16 @@ fn normalize_analysis_json(input: &str) -> String {
                 .or_else(|| captures.get(2))
                 .map(|match_| match_.as_str())
                 .unwrap_or("frequency");
-            let full = captures.get(0).map(|match_| match_.as_str()).unwrap_or_default();
-            let raw_value = full.split_once(':').map(|(_, value)| value).unwrap_or_default();
-            let number = parse_numeric_string(raw_value.trim().trim_matches(['\"', '\'']))
-                .unwrap_or(0.0);
+            let full = captures
+                .get(0)
+                .map(|match_| match_.as_str())
+                .unwrap_or_default();
+            let raw_value = full
+                .split_once(':')
+                .map(|(_, value)| value)
+                .unwrap_or_default();
+            let number =
+                parse_numeric_string(raw_value.trim().trim_matches(['\"', '\''])).unwrap_or(0.0);
             format!("\"{field}\":{number}")
         })
         .into_owned()
