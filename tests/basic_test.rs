@@ -390,19 +390,38 @@ async fn routed_inference_falls_back_to_byok() {
     let cloud_address = cloud.local_addr().unwrap();
     let cloud_server = tokio::spawn(async move {
         for _ in 0..10 {
-            let Ok(Ok((mut socket, _))) = tokio::time::timeout(std::time::Duration::from_secs(10), cloud.accept()).await else { break; };
+            let Ok(Ok((mut socket, _))) =
+                tokio::time::timeout(std::time::Duration::from_secs(10), cloud.accept()).await
+            else {
+                break;
+            };
             let mut buf = vec![0u8; 8192];
             let mut req = Vec::new();
             loop {
-                let Ok(Ok(n)) = tokio::time::timeout(std::time::Duration::from_secs(2), socket.read(&mut buf)).await else { break; };
-                if n == 0 { break; }
+                let Ok(Ok(n)) =
+                    tokio::time::timeout(std::time::Duration::from_secs(2), socket.read(&mut buf))
+                        .await
+                else {
+                    break;
+                };
+                if n == 0 {
+                    break;
+                }
                 req.extend_from_slice(&buf[..n]);
-                if req.windows(4).any(|w| w == b"
+                if req.windows(4).any(|w| {
+                    w == b"
 
-") { break; }
-                if req.len() > 64*1024 { break; }
+"
+                }) {
+                    break;
+                }
+                if req.len() > 64 * 1024 {
+                    break;
+                }
             }
-            let _ = socket.write_all(http_response(503, "{\"error\":\"unavailable\"}").as_bytes()).await;
+            let _ = socket
+                .write_all(http_response(503, "{\"error\":\"unavailable\"}").as_bytes())
+                .await;
             let _ = socket.shutdown().await;
         }
     });

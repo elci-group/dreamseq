@@ -56,16 +56,12 @@ impl BoundClient {
 
         // Use a private temp directory (0700) to avoid symlink races on
         // world-writable /tmp. Bound writes inside; we clean the directory.
-        let temp_dir = std::env::temp_dir().join(format!(
-            "dreamseq-bound-{}",
-            uuid::Uuid::new_v4()
-        ));
+        let temp_dir =
+            std::env::temp_dir().join(format!("dreamseq-bound-{}", uuid::Uuid::new_v4()));
         #[cfg(unix)]
         {
             use std::os::unix::fs::DirBuilderExt;
-            std::fs::DirBuilder::new()
-                .mode(0o700)
-                .create(&temp_dir)?;
+            std::fs::DirBuilder::new().mode(0o700).create(&temp_dir)?;
         }
         #[cfg(not(unix))]
         {
