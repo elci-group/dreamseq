@@ -609,7 +609,22 @@ impl Anthology {
 }
 
 fn yaml_scalar(value: &str) -> String {
-    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+    // Escape YAML double-quoted scalar per spec: backslash, quote, control chars.
+    let mut out = String::with_capacity(value.len() + 2);
+    out.push('"');
+    for ch in value.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if c.is_control() => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }
 
 fn category_from_pattern_type(
@@ -664,4 +679,39 @@ fn truncate_rationale(value: &str, max_len: usize) -> String {
     } else {
         format!("{}…", &value[..max_len.saturating_sub(1)])
     }
+}
+
+#[cfg(unix)]
+fn write_private(path: &std::path::Path, bytes: &[u8]) -> Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .mode(0o600)
+        .open(path)?;
+    file.write_all(bytes)?;
+    file.sync_all()?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn write_private(path: &std::path::Path, bytes: &[u8]) -> Result<()> {
+    std::fs::write(path, bytes)?;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn set_private_permissions(path: &std::path::Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let mut permissions = std::fs::metadata(path)?.permissions();
+    permissions.set_mode(0o600);
+    std::fs::set_permissions(path, permissions)?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn set_private_permissions(_path: &std::path::Path) -> Result<()> {
+    Ok(())
 }

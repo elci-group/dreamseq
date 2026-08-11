@@ -328,7 +328,9 @@ impl GroqClient {
                     }
                 }
                 Err(error) if attempt == MAX_ATTEMPTS => return Err(error.into()),
-                Err(_) => {}
+                Err(error) => {
+                    tracing::debug!(attempt, error = %error, "transient cloud inference error, retrying");
+                }
             }
             tokio::time::sleep(backoff(attempt)).await;
         }
@@ -372,7 +374,9 @@ impl GroqClient {
                     }
                 }
                 Err(error) if attempt == MAX_ATTEMPTS => return Err(error.into()),
-                Err(_) => {}
+                Err(error) => {
+                    tracing::debug!(attempt, error = %error, "transient provider error, retrying");
+                }
             }
             tokio::time::sleep(backoff(attempt)).await;
         }
