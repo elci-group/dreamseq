@@ -14,12 +14,6 @@ struct InferenceRequest {
     messages: Vec<Message>,
     temperature: f32,
     max_tokens: usize,
-    response_format: ResponseFormat,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct ResponseFormat {
-    r#type: &'static str,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -259,9 +253,6 @@ impl GroqClient {
                 messages: messages.clone(),
                 temperature: 0.3,
                 max_tokens: 4000,
-                response_format: ResponseFormat {
-                    r#type: "json_object",
-                },
             };
             match self.request_cloud(credentials, &request).await {
                 Ok(output) => match self.parse_analysis(&output.content) {
@@ -287,9 +278,6 @@ impl GroqClient {
                 messages: messages.clone(),
                 temperature: 0.3,
                 max_tokens: 4000,
-                response_format: ResponseFormat {
-                    r#type: "json_object",
-                },
             };
             match self.request_openai_compatible(route, &request).await {
                 Ok(output) => match self.parse_analysis(&output.content) {
