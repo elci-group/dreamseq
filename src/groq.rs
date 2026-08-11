@@ -463,7 +463,15 @@ impl GroqClient {
         }
         let json_str = &text[json_start..=json_end];
 
-        let mut value: serde_json::Value = serde_json::from_str(json_str)?;
+        let normalized = normalize_analysis_json(json_str);
+        let mut value: serde_json::Value = match serde_json::from_str(&normalized) {
+            Ok(value) => value,
+            Err(json_error) => json5::from_str(&normalized).map_err(|json5_error| {
+                anyhow::anyhow!(
+                    "invalid analysis JSON ({json_error}; JSON5 fallback: {json5_error})"
+                )
+            })?,
+        };
         coerce_analysis_scalars(&mut value);
         let analysis: Analysis = serde_json::from_value(value)?;
         Ok(analysis)
@@ -837,6 +845,20 @@ fn coerce_analysis_scalars(value: &mut serde_json::Value) {
         }
         _ => {}
     }
+}
+
+fn normalize_analysis_json(input: &str) -> String {
+    static NUMERIC_WORD: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(
+                r#"(?i)(?:\"|')?(frequency|severity|estimated_value|time_impact_minutes|estimated_time_saved|confidence)(?:\"|')?\s*:\s*([a-z]+)"#,
+            )
+            .expect("numeric analysis field regex must compile")
+    });
+    NUMERIC_WORD
+        .replace_all(input, |captures: &regex::Captures<'_>| {
+            format!("\"{}\":\"{}\"", &captures[1], &captures[2])
+        })
+        .into_owned()
 }
 
 fn parse_numeric_string(value: &str) -> Option<f64> {

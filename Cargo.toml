@@ -1,6 +1,6 @@
 [package]
 name = "dreamseq"
-version = "0.3.12"
+version = "0.3.13"
 edition = "2024"
 
 [dependencies]
@@ -8,6 +8,7 @@ tokio = { version = "1.0", features = ["fs", "io-util", "macros", "net", "rt-mul
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+json5 = "0.4"
 toml = "0.8"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4.0", features = ["derive"] }
