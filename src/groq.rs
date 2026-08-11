@@ -808,9 +808,9 @@ fn coerce_analysis_scalars(value: &mut serde_json::Value) {
         serde_json::Value::Object(object) => {
             for (key, child) in object.iter_mut() {
                 if NUMERIC_FIELDS.contains(&key.as_str()) && child.is_string() {
-                    if let Some(number) = parse_numeric_string(child.as_str().unwrap_or_default()) {
-                        *child = serde_json::json!(number);
-                    }
+                    let number =
+                        parse_numeric_string(child.as_str().unwrap_or_default()).unwrap_or(0.0);
+                    *child = serde_json::json!(number);
                 } else if TEXT_FIELDS.contains(&key.as_str())
                     && !child.is_string()
                     && !child.is_null()
@@ -862,9 +862,20 @@ fn normalize_analysis_json(input: &str) -> String {
 }
 
 fn parse_numeric_string(value: &str) -> Option<f64> {
-    let normalized = value.trim().to_ascii_lowercase();
+    let normalized = value
+        .trim()
+        .to_ascii_lowercase()
+        .trim_end_matches("-plus")
+        .to_string();
     if let Ok(number) = normalized.parse::<f64>() {
         return Some(number);
+    }
+    let leading_digits = normalized
+        .split(|character: char| !character.is_ascii_digit() && character != '.')
+        .find(|part| !part.is_empty())
+        .and_then(|part| part.parse::<f64>().ok());
+    if leading_digits.is_some() {
+        return leading_digits;
     }
     match normalized.as_str() {
         "zero" => Some(0.0),
