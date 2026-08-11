@@ -196,7 +196,11 @@ impl GroqClient {
         fallback_url: &str,
     ) -> Result<Self> {
         Ok(Self {
-            client: Client::builder().timeout(Duration::from_secs(5)).build()?,
+            client: Client::builder()
+                .timeout(Duration::from_secs(5))
+                .pool_idle_timeout(Duration::from_millis(0))
+                .pool_max_idle_per_host(0)
+                .build()?,
             cloud,
             routes: vec![InferenceRoute {
                 name: "test-fallback".to_string(),
