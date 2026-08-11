@@ -795,11 +795,23 @@ fn coerce_analysis_scalars(value: &mut serde_json::Value) {
         "prompt_pattern",
         "suggested_improvement",
     ];
+    const NUMERIC_FIELDS: &[&str] = &[
+        "frequency",
+        "severity",
+        "estimated_value",
+        "time_impact_minutes",
+        "estimated_time_saved",
+        "confidence",
+    ];
 
     match value {
         serde_json::Value::Object(object) => {
             for (key, child) in object.iter_mut() {
-                if TEXT_FIELDS.contains(&key.as_str()) && !child.is_string() && !child.is_null() {
+                if NUMERIC_FIELDS.contains(&key.as_str()) && child.is_string() {
+                    if let Some(number) = parse_numeric_string(child.as_str().unwrap_or_default()) {
+                        *child = serde_json::json!(number);
+                    }
+                } else if TEXT_FIELDS.contains(&key.as_str()) && !child.is_string() && !child.is_null() {
                     let replacement = match &*child {
                         serde_json::Value::Number(number) => number.to_string(),
                         serde_json::Value::Bool(boolean) => boolean.to_string(),
@@ -829,5 +841,43 @@ fn coerce_analysis_scalars(value: &mut serde_json::Value) {
             }
         }
         _ => {}
+    }
+}
+
+fn parse_numeric_string(value: &str) -> Option<f64> {
+    let normalized = value.trim().to_ascii_lowercase();
+    if let Ok(number) = normalized.parse::<f64>() {
+        return Some(number);
+    }
+    match normalized.as_str() {
+        "zero" => Some(0.0),
+        "one" => Some(1.0),
+        "two" => Some(2.0),
+        "three" => Some(3.0),
+        "four" => Some(4.0),
+        "five" => Some(5.0),
+        "six" => Some(6.0),
+        "seven" => Some(7.0),
+        "eight" => Some(8.0),
+        "nine" => Some(9.0),
+        "ten" => Some(10.0),
+        "eleven" => Some(11.0),
+        "twelve" => Some(12.0),
+        "thirteen" => Some(13.0),
+        "fourteen" => Some(14.0),
+        "fifteen" => Some(15.0),
+        "sixteen" => Some(16.0),
+        "seventeen" => Some(17.0),
+        "eighteen" => Some(18.0),
+        "nineteen" => Some(19.0),
+        "twenty" => Some(20.0),
+        "thirty" => Some(30.0),
+        "forty" => Some(40.0),
+        "fifty" => Some(50.0),
+        "sixty" => Some(60.0),
+        "seventy" => Some(70.0),
+        "eighty" => Some(80.0),
+        "ninety" => Some(90.0),
+        _ => None,
     }
 }
