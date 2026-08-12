@@ -10,9 +10,13 @@ use std::process::Command;
 use std::time::Duration;
 use walkdir::WalkDir;
 
+#[path = "cloud_credentials.rs"]
+mod cloud_credentials;
+
 const LEGACY_API_URL: &str = "https://dreamsequence.pro";
 const DEFAULT_API_URL: &str = "https://padagonia.dreamsequence.pro/dreamsequence";
 const SCHEMA_VERSION: u8 = 1;
+const MAX_API_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Credentials {
@@ -46,57 +50,19 @@ impl CredentialStore {
     }
 
     pub fn load(&self) -> Result<Credentials> {
-        let bytes = fs::read(&self.path).with_context(|| {
-            format!(
-                "Dreamseq is not paired. Run `dreamseq login` first ({})",
-                self.path.display()
-            )
-        })?;
-        serde_json::from_slice(&bytes).context("stored Dreamsequence credentials are invalid")
+        self.load_credentials()
     }
 
     pub fn load_optional(&self) -> Result<Option<Credentials>> {
-        match fs::read(&self.path) {
-            Ok(bytes) => Ok(Some(
-                serde_json::from_slice(&bytes)
-                    .context("stored Dreamsequence credentials are invalid")?,
-            )),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                tracing::debug!(path = %self.path.display(), "Dreamsequence credentials are not present");
-                Ok(None)
-            }
-            Err(error) => {
-                tracing::error!(path = %self.path.display(), error = %error, "failed to read Dreamsequence credentials");
-                Err(error.into())
-            }
-        }
+        self.load_optional_credentials()
     }
 
     pub fn save(&self, credentials: &Credentials) -> Result<()> {
-        let parent = self
-            .path
-            .parent()
-            .ok_or_else(|| anyhow::anyhow!("credentials path has no parent"))?;
-        fs::create_dir_all(parent)?;
-        crate::fs_security::write_private_atomic(
-            &self.path,
-            &serde_json::to_vec_pretty(credentials)?,
-        )?;
-        Ok(())
+        self.save_credentials(credentials)
     }
 
     pub fn remove(&self) -> Result<bool> {
-        match fs::remove_file(&self.path) {
-            Ok(()) => Ok(true),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                tracing::debug!(path = %self.path.display(), "Dreamsequence credentials were already absent");
-                Ok(false)
-            }
-            Err(error) => {
-                tracing::error!(path = %self.path.display(), error = %error, "failed to remove Dreamsequence credentials");
-                Err(error.into())
-            }
-        }
+        self.remove_credentials()
     }
 }
 
@@ -394,7 +360,16 @@ pub struct SyncSummary {
 
 async fn parse_response<T: for<'de> Deserialize<'de>>(response: reqwest::Response) -> Result<T> {
     let status = response.status();
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_API_RESPONSE_BYTES as u64)
+    {
+        anyhow::bail!("Dreamsequence API response exceeds the 4 MiB limit");
+    }
     let bytes = response.bytes().await?;
+    if bytes.len() > MAX_API_RESPONSE_BYTES {
+        anyhow::bail!("Dreamsequence API response exceeds the 4 MiB limit");
+    }
     if !status.is_success() {
         let error = serde_json::from_slice::<ApiError>(&bytes).unwrap_or(ApiError {
             error: None,
