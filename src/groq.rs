@@ -5,9 +5,12 @@ pub use crate::analysis::{
 use crate::cloud::Credentials;
 use crate::segmentation::Segment;
 use anyhow::Result;
-use reqwest::{Client, StatusCode};
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
+
+#[path = "inference_transport.rs"]
+mod inference_transport;
 
 const MAX_PROMPT_CHARS: usize = 48_000;
 const MAX_ATTEMPTS: usize = 3;
@@ -253,96 +256,6 @@ impl GroqClient {
         }
 
         anyhow::bail!("all inference routes failed: {}", failures.join("; "))
-    }
-
-    async fn request_cloud(
-        &self,
-        credentials: &Credentials,
-        request: &InferenceRequest,
-    ) -> Result<InferenceOutput> {
-        for attempt in 1..=MAX_ATTEMPTS {
-            let response = self
-                .client
-                .post(format!(
-                    "{}/api/v1/inference",
-                    crate::cloud::effective_api_url(&credentials.api_url).trim_end_matches('/')
-                ))
-                .bearer_auth(&credentials.access_token)
-                .json(request)
-                .send()
-                .await;
-            match response {
-                Ok(response) if response.status().is_success() => {
-                    let response: CloudInferenceResponse = response.json().await?;
-                    return Ok(InferenceOutput {
-                        content: response.content,
-                        tokens_used: response.usage.total_tokens,
-                        provider: response.provider,
-                        model: response.model,
-                    });
-                }
-                Ok(response) => {
-                    let status = response.status();
-                    let retryable = retryable_status(status);
-                    let error = truncate(&response.text().await.unwrap_or_default(), 300);
-                    if !retryable || attempt == MAX_ATTEMPTS {
-                        anyhow::bail!("HTTP {status}: {error}");
-                    }
-                }
-                Err(error) if attempt == MAX_ATTEMPTS => return Err(error.into()),
-                Err(error) => {
-                    tracing::debug!(attempt, error = %error, "transient cloud inference error, retrying");
-                }
-            }
-            tokio::time::sleep(backoff(attempt)).await;
-        }
-        anyhow::bail!("cloud inference exhausted retry attempts")
-    }
-
-    async fn request_openai_compatible(
-        &self,
-        route: &InferenceRoute,
-        request: &InferenceRequest,
-    ) -> Result<InferenceOutput> {
-        for attempt in 1..=MAX_ATTEMPTS {
-            let response = self
-                .client
-                .post(format!("{}/chat/completions", route.base_url))
-                .bearer_auth(&route.api_key)
-                .json(request)
-                .send()
-                .await;
-            match response {
-                Ok(response) if response.status().is_success() => {
-                    let response: OpenAiResponse = response.json().await?;
-                    let content = response
-                        .choices
-                        .first()
-                        .map(|choice| choice.message.content.clone())
-                        .ok_or_else(|| anyhow::anyhow!("response contained no choices"))?;
-                    return Ok(InferenceOutput {
-                        content,
-                        tokens_used: response.usage.total_tokens,
-                        provider: route.name.clone(),
-                        model: route.model.clone(),
-                    });
-                }
-                Ok(response) => {
-                    let status = response.status();
-                    let retryable = retryable_status(status);
-                    let error = truncate(&response.text().await.unwrap_or_default(), 300);
-                    if !retryable || attempt == MAX_ATTEMPTS {
-                        anyhow::bail!("HTTP {status}: {error}");
-                    }
-                }
-                Err(error) if attempt == MAX_ATTEMPTS => return Err(error.into()),
-                Err(error) => {
-                    tracing::debug!(attempt, error = %error, "transient provider error, retrying");
-                }
-            }
-            tokio::time::sleep(backoff(attempt)).await;
-        }
-        anyhow::bail!("provider exhausted retry attempts")
     }
 
     fn prompt_preamble() -> String {
@@ -641,14 +554,6 @@ fn validate_provider_url(url: &str) -> Result<()> {
         anyhow::bail!("BYOK inference endpoints must use HTTPS (localhost is allowed for tests)");
     }
     Ok(())
-}
-
-fn retryable_status(status: StatusCode) -> bool {
-    matches!(status.as_u16(), 408 | 409 | 425 | 429) || status.is_server_error()
-}
-
-fn backoff(attempt: usize) -> Duration {
-    Duration::from_millis(250 * (1_u64 << attempt.saturating_sub(1).min(3)))
 }
 
 fn split_text(text: &str, max_bytes: usize) -> Vec<&str> {
