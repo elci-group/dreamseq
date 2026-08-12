@@ -37,3 +37,6 @@ jobs:
 
       - name: Audit dependencies
         run: cargo audit
+
+      - name: Verify distributable package
+        run: cargo package --locked

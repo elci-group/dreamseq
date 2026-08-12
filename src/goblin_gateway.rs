@@ -1,6 +1,5 @@
 //! Deterministic Goblin boundaries for Dreamseq's probabilistic pipeline.
 
-use goblin::{CapabilityId, ResponseStatus, run_capability};
 use serde_json::Value;
 use std::fmt;
 
@@ -24,25 +23,19 @@ impl fmt::Display for GatewayDecision {
 /// Validate a Dreamseq run envelope before it is persisted or uploaded.
 /// Observe-only callers can record the decision without blocking the pipeline.
 pub fn validate_run_envelope(envelope: &Value, threshold: f64) -> GatewayDecision {
-    let input = serde_json::json!({
-        "data": envelope,
-        "required": ["schema_version", "run"]
-    });
-    let response = run_capability(
-        CapabilityId::SchemaValidation,
-        &input.to_string(),
-        threshold,
-    );
-    match response.status {
-        ResponseStatus::Success => {
-            if response.result.get("valid").and_then(Value::as_bool) == Some(true) {
-                GatewayDecision::Accept
-            } else {
-                GatewayDecision::Reject(response.result.to_string())
-            }
-        }
-        ResponseStatus::Escalate => GatewayDecision::Escalate(response.result.to_string()),
-        ResponseStatus::Error => GatewayDecision::Reject(response.result.to_string()),
+    let Some(object) = envelope.as_object() else {
+        return GatewayDecision::Reject("run envelope must be a JSON object".into());
+    };
+    if object.get("schema_version").and_then(Value::as_u64) != Some(1) {
+        return GatewayDecision::Reject("unsupported or missing schema_version".into());
+    }
+    if !object.get("run").is_some_and(Value::is_object) {
+        return GatewayDecision::Reject("run envelope must contain an object-valued run".into());
+    }
+    if threshold < 0.5 {
+        GatewayDecision::Escalate("validation threshold is below the safe minimum".into())
+    } else {
+        GatewayDecision::Accept
     }
 }
 

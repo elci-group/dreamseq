@@ -354,6 +354,18 @@ When kaptaind is enabled, Dreamseq will:
 
 ## 🧑‍💻 Development
 
+### Distribution
+
+The crate has no private path dependencies and can be packaged reproducibly:
+
+```bash
+cargo package --locked
+```
+
+Release artifacts should be built from a tagged commit, checksummed, and
+published alongside the matching source package. Enterprise pilots should pin
+the artifact checksum and retain the release metadata.
+
 ### Running Tests
 
 ```bash
