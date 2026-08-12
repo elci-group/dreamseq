@@ -1,4 +1,5 @@
 pub mod aggregator;
+pub mod analysis;
 pub mod bound;
 pub mod cloud;
 pub mod color;
