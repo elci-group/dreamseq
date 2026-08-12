@@ -19,6 +19,15 @@ Individual lockups, symbols, and application icons are available in [`docs/asset
 
 Dreamseq is an engineering observability system for human–AI collaboration. Traditional observability tools measure software (latency, errors, throughput); Dreamseq measures the **development process itself**: where cognition, tooling, model behavior, and workflow introduce friction.
 
+### Initial enterprise audience
+
+Dreamseq is initially aimed at engineering-platform and developer-productivity
+teams operating AI coding agents across multiple harnesses. It provides
+cohort-level decision support for reducing agent rework and workflow friction;
+it is not an employee surveillance or calibrated individual productivity score.
+See the [enterprise readiness guide](docs/enterprise-readiness.md), [design
+partner program](docs/design-partner-program.md), and [pilot metrics](docs/pilot-metrics.md).
+
 By mining patterns from your AI agent interactions across all harnesses, Dreamseq generates prioritized technical directives that inform the design of the next generation of tools and harnesses.
 
 ---
@@ -101,7 +110,7 @@ By mining patterns from your AI agent interactions across all harnesses, Dreamse
 
 ```bash
 # Clone the repository
-git clone <repository-url>
+git clone https://github.com/elci-group/dreamseq.git
 cd dreamseq
 
 # Build the project
