@@ -18,7 +18,13 @@ require_regex = ["CredentialStore", "device/authorize", "device/token", "api/v1/
 path = "src/groq.rs"
 required = true
 forbid_regex = ["TODO", "FIXME", "unimplemented!", "panic!"]
-require_regex = ["api/v1/inference", "DREAMSEQ_BYOK_ROUTES", "request_openai_compatible", "request_cloud"]
+require_regex = ["DREAMSEQ_BYOK_ROUTES", "configured_byok_routes", "validate_provider_url"]
+
+[[file]]
+path = "src/inference_transport.rs"
+required = true
+forbid_regex = ["TODO", "FIXME", "unimplemented!", "panic!"]
+require_regex = ["api/v1/inference", "request_openai_compatible", "request_cloud"]
 
 [[file]]
 path = "Cargo.toml"

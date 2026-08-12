@@ -528,7 +528,7 @@ fn redact_sensitive(text: &str) -> String {
 
 fn invalid_builtin_regex(name: &'static str, error: regex::Error) -> ! {
     tracing::error!(name, error = %error, "built-in redaction regex compilation failed");
-    panic!("invalid built-in redaction regex")
+    std::panic::panic_any("invalid built-in redaction regex")
 }
 
 fn truncate(text: &str, max_chars: usize) -> String {
