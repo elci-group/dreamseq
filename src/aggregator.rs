@@ -55,7 +55,10 @@ static TIMESTAMP_PREFIX_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r"^(?P<ts>\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)\s*(?P<rest>.*)$",
     )
-    .expect("the built-in timestamp regex must compile")
+    .unwrap_or_else(|error| {
+        tracing::error!(error = %error, pattern = "timestamp_prefix", "built-in regex compilation failed");
+        panic!("invalid built-in timestamp regex")
+    })
 });
 
 pub struct LogAggregator;

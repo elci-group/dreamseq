@@ -29,80 +29,53 @@ pub enum SteeringCategory {
 }
 
 static MISSING_TOOL_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
-    vec![
-        Regex::new(r"i wish i had").unwrap(),
-        Regex::new(r"we need a tool for").unwrap(),
-        Regex::new(r"there should be a command").unwrap(),
-        Regex::new(r"missing.*tool").unwrap(),
-        Regex::new(r"would be nice if.*could").unwrap(),
-    ]
+    compile_patterns("missing_tool", &[r"i wish i had", r"we need a tool for", r"there should be a command", r"missing.*tool", r"would be nice if.*could"])
 });
 
 static MISSING_CONTEXT_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
-    vec![
-        Regex::new(r"we already decided").unwrap(),
-        Regex::new(r"you forgot").unwrap(),
-        Regex::new(r"as i mentioned").unwrap(),
-        Regex::new(r"remember that").unwrap(),
-        Regex::new(r"we discussed").unwrap(),
-        Regex::new(r"losing context").unwrap(),
-    ]
+    compile_patterns("missing_context", &[r"we already decided", r"you forgot", r"as i mentioned", r"remember that", r"we discussed", r"losing context"])
 });
 
 static WRONG_ABSTRACTION_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
-    vec![
-        Regex::new(r"that's not what i asked").unwrap(),
-        Regex::new(r"you're solving the wrong problem").unwrap(),
-        Regex::new(r"wrong approach").unwrap(),
-        Regex::new(r"not the right abstraction").unwrap(),
-        Regex::new(r"misunderstood the requirement").unwrap(),
-    ]
+    compile_patterns("wrong_abstraction", &[r"that's not what i asked", r"you're solving the wrong problem", r"wrong approach", r"not the right abstraction", r"misunderstood the requirement"])
 });
 
 static EXCESS_VERBOSITY_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
-    vec![
-        Regex::new(r"be more concise").unwrap(),
-        Regex::new(r"too verbose").unwrap(),
-        Regex::new(r"\bshorter\b").unwrap(),
-        Regex::new(r"get to the point").unwrap(),
-        Regex::new(r"less detail").unwrap(),
-        Regex::new(r"keep it brief").unwrap(),
-    ]
+    compile_patterns("excess_verbosity", &[r"be more concise", r"too verbose", r"\bshorter\b", r"get to the point", r"less detail", r"keep it brief"])
 });
 
 static HALLUCINATION_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
-    vec![
-        Regex::new(r"that.*doesn't exist").unwrap(),
-        Regex::new(r"no such.*api").unwrap(),
-        Regex::new(r"that command doesn't").unwrap(),
-        Regex::new(r"\binvented\b").unwrap(),
-        Regex::new(r"\bhallucinated\b").unwrap(),
-        Regex::new(r"not a real").unwrap(),
-    ]
+    compile_patterns("hallucination", &[r"that.*doesn't exist", r"no such.*api", r"that command doesn't", r"\binvented\b", r"\bhallucinated\b", r"not a real"])
 });
 
 static ARCHITECTURAL_MISMATCH_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
-    vec![
-        Regex::new(r"doesn't fit the workflow").unwrap(),
-        Regex::new(r"architectural mismatch").unwrap(),
-        Regex::new(r"wrong for this use case").unwrap(),
-        Regex::new(r"doesn't scale").unwrap(),
-        Regex::new(r"not the right fit").unwrap(),
-    ]
+    compile_patterns("architectural_mismatch", &[r"doesn't fit the workflow", r"architectural mismatch", r"wrong for this use case", r"doesn't scale", r"not the right fit"])
 });
 
 static MANUAL_REPETITION_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
-    vec![
+    compile_patterns("manual_repetition", &[
         // Match "again" only when it's tied to an action, avoiding stray words
         // like "... failed again" in telemetry noise.
-        Regex::new(r"\b(?:do|run|execute|perform|say|write|try)\s+(?:it|that|this)\s+again\b")
-            .unwrap(),
-        Regex::new(r"\brepeat(?:\s+(?:that|this|it|the\s+\w+))?\b").unwrap(),
-        Regex::new(r"\bsame as before\b").unwrap(),
-        Regex::new(r"\bdo it again\b").unwrap(),
-        Regex::new(r"\blike last time\b").unwrap(),
-    ]
+        r"\b(?:do|run|execute|perform|say|write|try)\s+(?:it|that|this)\s+again\b",
+        r"\brepeat(?:\s+(?:that|this|it|the\s+\w+))?\b",
+        r"\bsame as before\b",
+        r"\bdo it again\b",
+        r"\blike last time\b",
+    ])
 });
+
+fn compile_patterns(group: &'static str, patterns: &[&'static str]) -> Vec<Regex> {
+    patterns
+        .iter()
+        .filter_map(|pattern| match Regex::new(pattern) {
+            Ok(regex) => Some(regex),
+            Err(error) => {
+                tracing::error!(group, pattern, error = %error, "built-in steering regex compilation failed");
+                None
+            }
+        })
+        .collect()
+}
 
 pub struct SteeringDetector;
 

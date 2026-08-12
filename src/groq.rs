@@ -664,25 +664,25 @@ fn redact_sensitive(text: &str) -> String {
         regex::Regex::new(
             r#"(?i)((?:api[_-]?key|access[_-]?token|auth[_-]?token|secret|password|authorization)\s*[:=]\s*(?:bearer\s+)?)[^\s,;\"']+"#,
         )
-        .expect("the built-in credential assignment regex must compile")
+        .unwrap_or_else(|error| invalid_builtin_regex("credential_assignment", error))
     });
     static JWT: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
         regex::Regex::new(r"\b[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b")
-            .expect("the built-in JWT regex must compile")
+            .unwrap_or_else(|error| invalid_builtin_regex("jwt", error))
     });
     static PROVIDER_TOKEN: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
         regex::Regex::new(
             r"\b(?:AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9_-]{20,})\b",
         )
-        .expect("the built-in provider token regex must compile")
+        .unwrap_or_else(|error| invalid_builtin_regex("provider_token", error))
     });
     static EMAIL: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
         regex::Regex::new(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
-            .expect("the built-in email regex must compile")
+            .unwrap_or_else(|error| invalid_builtin_regex("email", error))
     });
     static HOME_PATH: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
         regex::Regex::new(r"/(?:home|Users)/[^/\s]+")
-            .expect("the built-in home path regex must compile")
+            .unwrap_or_else(|error| invalid_builtin_regex("home_path", error))
     });
 
     let redacted = ASSIGNMENT.replace_all(text, "${1}[REDACTED]");
@@ -692,6 +692,11 @@ fn redact_sensitive(text: &str) -> String {
     HOME_PATH
         .replace_all(&redacted, "/home/[REDACTED_USER]")
         .into_owned()
+}
+
+fn invalid_builtin_regex(name: &'static str, error: regex::Error) -> ! {
+    tracing::error!(name, error = %error, "built-in redaction regex compilation failed");
+    panic!("invalid built-in redaction regex")
 }
 
 fn truncate(text: &str, max_chars: usize) -> String {
@@ -772,7 +777,7 @@ fn normalize_analysis_json(input: &str) -> String {
         regex::Regex::new(
                 r#"(?i)(?:\"(frequency|severity|estimated_value|time_impact_minutes|estimated_time_saved|confidence)\"|(frequency|severity|estimated_value|time_impact_minutes|estimated_time_saved|confidence))\s*:\s*(?:\"[^\"]*\"|'[^']*'|[^,}\n]+)"#,
             )
-            .expect("numeric analysis field regex must compile")
+            .unwrap_or_else(|error| invalid_builtin_regex("numeric_analysis_field", error))
     });
     NUMERIC_VALUE
         .replace_all(input, |captures: &regex::Captures<'_>| {
