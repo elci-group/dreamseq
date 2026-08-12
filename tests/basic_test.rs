@@ -519,7 +519,10 @@ fn analysis_parser_repairs_provider_string_items() {
     assert_eq!(parsed.harness_friction[0].issue, "slow shell startup");
     assert_eq!(parsed.missing_tooling[0].purpose, "release evidence");
     assert_eq!(parsed.repeated_commands[0].command, "git status");
-    assert_eq!(parsed.automation_opportunities[0].description, "generate a release helper");
+    assert_eq!(
+        parsed.automation_opportunities[0].description,
+        "generate a release helper"
+    );
 }
 
 #[test]

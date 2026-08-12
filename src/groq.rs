@@ -1,5 +1,8 @@
+pub use crate::analysis::{
+    Analysis, AutomationOpportunity, ContextLoss, HarnessFriction, MissingTool, ModelFailure,
+    RepeatedCommand, RepeatedPrompt, WorkflowBottleneck,
+};
 use crate::cloud::Credentials;
-pub use crate::analysis::{Analysis, AutomationOpportunity, ContextLoss, HarnessFriction, MissingTool, ModelFailure, RepeatedCommand, RepeatedPrompt, WorkflowBottleneck};
 use crate::segmentation::Segment;
 use anyhow::Result;
 use reqwest::{Client, StatusCode};
@@ -449,32 +452,104 @@ impl GroqClient {
 /// deterministic: it never invents evidence, and uses conservative defaults
 /// for metrics that were not supplied by the provider.
 fn normalize_analysis_items(value: &mut serde_json::Value) {
-    let Some(object) = value.as_object_mut() else { return };
+    let Some(object) = value.as_object_mut() else {
+        return;
+    };
     let schemas: &[(&str, &[(&str, serde_json::Value)])] = &[
-        ("model_failures", &[("model", serde_json::json!("unknown")), ("issue", serde_json::json!("")), ("frequency", serde_json::json!(1)), ("example", serde_json::json!(""))]),
-        ("harness_friction", &[("harness", serde_json::json!("unknown")), ("issue", serde_json::json!("")), ("severity", serde_json::json!(0.5))]),
-        ("missing_tooling", &[("tool_name", serde_json::json!("candidate-capability")), ("purpose", serde_json::json!("")), ("estimated_value", serde_json::json!(0.5))]),
-        ("workflow_bottlenecks", &[("description", serde_json::json!("")), ("frequency", serde_json::json!(1)), ("time_impact_minutes", serde_json::json!(0.0))]),
-        ("repeated_commands", &[("command", serde_json::json!("")), ("frequency", serde_json::json!(1)), ("context", serde_json::json!(""))]),
-        ("repeated_prompts", &[("prompt_pattern", serde_json::json!("")), ("frequency", serde_json::json!(1)), ("suggested_improvement", serde_json::json!(""))]),
-        ("context_loss", &[("description", serde_json::json!("")), ("affected_segments", serde_json::json!([]))]),
-        ("automation_opportunities", &[("description", serde_json::json!("")), ("estimated_time_saved", serde_json::json!(0.0)), ("confidence", serde_json::json!(0.5))]),
+        (
+            "model_failures",
+            &[
+                ("model", serde_json::json!("unknown")),
+                ("issue", serde_json::json!("")),
+                ("frequency", serde_json::json!(1)),
+                ("example", serde_json::json!("")),
+            ],
+        ),
+        (
+            "harness_friction",
+            &[
+                ("harness", serde_json::json!("unknown")),
+                ("issue", serde_json::json!("")),
+                ("severity", serde_json::json!(0.5)),
+            ],
+        ),
+        (
+            "missing_tooling",
+            &[
+                ("tool_name", serde_json::json!("candidate-capability")),
+                ("purpose", serde_json::json!("")),
+                ("estimated_value", serde_json::json!(0.5)),
+            ],
+        ),
+        (
+            "workflow_bottlenecks",
+            &[
+                ("description", serde_json::json!("")),
+                ("frequency", serde_json::json!(1)),
+                ("time_impact_minutes", serde_json::json!(0.0)),
+            ],
+        ),
+        (
+            "repeated_commands",
+            &[
+                ("command", serde_json::json!("")),
+                ("frequency", serde_json::json!(1)),
+                ("context", serde_json::json!("")),
+            ],
+        ),
+        (
+            "repeated_prompts",
+            &[
+                ("prompt_pattern", serde_json::json!("")),
+                ("frequency", serde_json::json!(1)),
+                ("suggested_improvement", serde_json::json!("")),
+            ],
+        ),
+        (
+            "context_loss",
+            &[
+                ("description", serde_json::json!("")),
+                ("affected_segments", serde_json::json!([])),
+            ],
+        ),
+        (
+            "automation_opportunities",
+            &[
+                ("description", serde_json::json!("")),
+                ("estimated_time_saved", serde_json::json!(0.0)),
+                ("confidence", serde_json::json!(0.5)),
+            ],
+        ),
     ];
     for (key, fields) in schemas {
-        let Some(items) = object.get_mut(*key).and_then(serde_json::Value::as_array_mut) else { continue };
+        let Some(items) = object
+            .get_mut(*key)
+            .and_then(serde_json::Value::as_array_mut)
+        else {
+            continue;
+        };
         for item in items.iter_mut() {
-            let Some(text) = item.as_str().map(str::trim).filter(|text| !text.is_empty()) else { continue };
+            let Some(text) = item.as_str().map(str::trim).filter(|text| !text.is_empty()) else {
+                continue;
+            };
             let mut normalized = serde_json::Map::new();
-            for (field, default) in *fields { normalized.insert((*field).to_string(), default.clone()); }
+            for (field, default) in *fields {
+                normalized.insert((*field).to_string(), default.clone());
+            }
             let primary = match *key {
                 "model_failures" | "harness_friction" => "issue",
                 "missing_tooling" => "purpose",
-                "workflow_bottlenecks" | "context_loss" | "automation_opportunities" => "description",
+                "workflow_bottlenecks" | "context_loss" | "automation_opportunities" => {
+                    "description"
+                }
                 "repeated_commands" => "command",
                 "repeated_prompts" => "prompt_pattern",
                 _ => "description",
             };
-            normalized.insert(primary.to_string(), serde_json::Value::String(text.to_string()));
+            normalized.insert(
+                primary.to_string(),
+                serde_json::Value::String(text.to_string()),
+            );
             *item = serde_json::Value::Object(normalized);
         }
     }
