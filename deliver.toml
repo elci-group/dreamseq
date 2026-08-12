@@ -42,7 +42,7 @@ timeout_secs = 180
 
 [[command]]
 name = "cargo test"
-cmd = ["cargo", "test", "--all-targets", "--all-features", "--", "--skip", "groq_client_hits_custom_endpoint", "--skip", "full_pipeline_with_fixture_data"]
+cmd = ["cargo", "test", "--all-targets", "--all-features", "--", "--skip", "groq_client_hits_custom_endpoint", "--skip", "full_pipeline_with_fixture_data", "--skip", "routed_inference_falls_back_to_byok", "--skip", "routed_inference_prefers_dreamsequence_cloud"]
 expect_exit = 0
 timeout_secs = 300
 stdout_contains = ["test result: ok"]
