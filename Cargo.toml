@@ -1,11 +1,14 @@
 [package]
 name = "dreamseq"
-version = "1.3.5"
+version = "1.3.6"
 edition = "2024"
 license = "MIT"
+description = "Privacy-conscious engineering intelligence for human-AI collaboration"
+repository = "https://github.com/elci-group/dreamseq"
+readme = "README.md"
 
 [dependencies]
-goblin = { path = "../goblin" }
+goblin = { version = "0.1.5", path = "../goblin" }
 tokio = { version = "1.0", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "time"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde = { version = "1.0", features = ["derive"] }
