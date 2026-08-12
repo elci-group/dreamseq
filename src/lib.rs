@@ -11,6 +11,7 @@ pub mod normalization;
 pub mod patterns;
 pub mod present;
 pub mod report;
+mod report_persistence;
 pub mod segmentation;
 pub mod steering;
 pub mod trends;

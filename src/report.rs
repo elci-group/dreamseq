@@ -492,94 +492,15 @@ impl Anthology {
     }
 
     pub fn save(&self) -> Result<PathBuf> {
-        fs::create_dir_all(&self.config.anthologies_dir)?;
-
-        let filename = format!("dreamseq-{}-{}.json", self.date, self.id);
-        let filepath = self.config.anthologies_dir.join(filename);
-
-        let content = serde_json::to_string_pretty(self)?;
-        crate::fs_security::write_private_atomic(&filepath, content.as_bytes())?;
-
-        tracing::info!("Saved anthology to {:?}", filepath);
-        Ok(filepath)
+        crate::report_persistence::save(self)
     }
 
     /// Write a concise, agent-consumable backlog of unresolved interventions.
     pub fn save_dreams(&self, repository: &std::path::Path) -> Result<PathBuf> {
-        let dreams_dir = repository.join(".dreams");
-        fs::create_dir_all(&dreams_dir)?;
-        fs::create_dir_all(dreams_dir.join("history"))?;
-        for lifecycle in ["completed.dreams", "rejected.dreams"] {
-            let lifecycle_path = dreams_dir.join(lifecycle);
-            if !lifecycle_path.exists() {
-                match crate::fs_security::create_private(
-                    &lifecycle_path,
-                    b"version: 1\ndreams: []\n",
-                ) {
-                    Ok(()) => {}
-                    Err(error) if error.downcast_ref::<std::io::Error>().is_some_and(|error| {
-                        error.kind() == std::io::ErrorKind::AlreadyExists
-                    }) => {}
-                    Err(error) => return Err(error),
-                }
-            }
-        }
-        let path = dreams_dir.join("active.dreams");
-        let mut output = String::new();
-        let project = repository
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("workspace");
-        output.push_str("version: 1\n");
-        output.push_str(&format!("project: {}\n", yaml_scalar(project)));
-        output.push_str("generated:\n  by: dreamseq\n");
-        output.push_str(&format!(
-            "  date: {}\n  confidence: {:.2}\n",
-            self.date,
-            self.average_confidence()
-        ));
-        output.push_str("source:\n");
-        output.push_str(&format!("    logs: {}\n", self.pipeline.raw_entries));
-        output.push_str(&format!(
-            "    normalized_events: {}\n",
-            self.pipeline.normalized_entries
-        ));
-        output.push_str(&format!("    segments: {}\n", self.pipeline.segments));
-        output.push_str(&format!(
-            "    steering_events: {}\n",
-            self.steering_events.len()
-        ));
-        output.push_str("\ndreams:\n");
-        for (index, tool) in self.candidate_tools.iter().enumerate() {
-            let priority = match tool.priority {
-                Priority::High => "HIGH",
-                Priority::Medium => "MEDIUM",
-                Priority::Low => "LOW",
-            };
-            let action = if tool.existing_matches.is_empty() {
-                "create capability"
-            } else {
-                "extend existing capability"
-            };
-            output.push_str(&format!(
-                "\n  - id: dream-{:03}\n    priority: {}\n    category: workflow-friction\n    title: {}\n    problem: {}\n    evidence:\n      reason: {}\n      confidence: {:.2}\n      mutation_fitness: {:.2}\n    affected:\n{}    proposed_mutation:\n      action: {}\n      capability: {}\n    acceptance:\n      - Evidence-backed intervention reduces recurrence of this friction\n      - Outcome is verified by tests or deterministic operational checks\n    expected_value: {}\n",
-                index + 1, priority, yaml_scalar(&tool.name), yaml_scalar(&tool.reason),
-                yaml_scalar(&tool.reason), tool.confidence, tool.mutation_fitness,
-                if tool.existing_matches.is_empty() { "      - none identified\n".to_string() } else { tool.existing_matches.iter().map(|name| format!("      - {}\n", yaml_scalar(name))).collect() },
-                action, yaml_scalar(&tool.name), yaml_scalar(&tool.estimated_time_saved)
-            ));
-        }
-        crate::fs_security::write_private_atomic(&path, output.as_bytes())?;
-        crate::fs_security::write_private_atomic(
-            &dreams_dir
-                .join("history")
-                .join(format!("{}-{}.dreams", self.date, self.id)),
-            output.as_bytes(),
-        )?;
-        Ok(path)
+        crate::report_persistence::save_dreams(self, repository)
     }
 
-    fn average_confidence(&self) -> f64 {
+    pub(crate) fn average_confidence(&self) -> f64 {
         if self.candidate_tools.is_empty() {
             return 0.0;
         }
@@ -614,25 +535,6 @@ impl Anthology {
 
         directives
     }
-}
-
-fn yaml_scalar(value: &str) -> String {
-    // Escape YAML double-quoted scalar per spec: backslash, quote, control chars.
-    let mut out = String::with_capacity(value.len() + 2);
-    out.push('"');
-    for ch in value.chars() {
-        match ch {
-            '\\' => out.push_str("\\\\"),
-            '"' => out.push_str("\\\""),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if c.is_control() => out.push_str(&format!("\\u{:04x}", c as u32)),
-            c => out.push(c),
-        }
-    }
-    out.push('"');
-    out
 }
 
 fn category_from_pattern_type(
