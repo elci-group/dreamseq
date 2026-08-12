@@ -26,6 +26,7 @@ pub use report::{Anthology, Directive, PipelineStats, Priority};
 pub use segmentation::SemanticSegmenter;
 pub use steering::SteeringDetector;
 pub use trends::{TrendAnalysis, TrendAnalyzer};
+pub mod goblin_gateway;
 
 use anyhow::Result;
 
