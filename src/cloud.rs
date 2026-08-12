@@ -536,10 +536,22 @@ mod tests {
 
     #[test]
     fn migrates_legacy_commercial_origin_without_repairing() {
-        assert_eq!(effective_api_url("https://dreamsequence.pro"), DEFAULT_API_URL);
-        assert_eq!(effective_api_url("https://dreamsequence.pro/"), DEFAULT_API_URL);
-        assert_eq!(effective_api_url("https://self-hosted.example"), "https://self-hosted.example");
-        assert_eq!(CloudClient::new(Some(LEGACY_API_URL)).unwrap().base_url, DEFAULT_API_URL);
+        assert_eq!(
+            effective_api_url("https://dreamsequence.pro"),
+            DEFAULT_API_URL
+        );
+        assert_eq!(
+            effective_api_url("https://dreamsequence.pro/"),
+            DEFAULT_API_URL
+        );
+        assert_eq!(
+            effective_api_url("https://self-hosted.example"),
+            "https://self-hosted.example"
+        );
+        assert_eq!(
+            CloudClient::new(Some(LEGACY_API_URL)).unwrap().base_url,
+            DEFAULT_API_URL
+        );
     }
 
     #[test]
