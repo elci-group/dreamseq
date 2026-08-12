@@ -224,11 +224,25 @@ impl GroqClient {
         }
         let prompts = self.build_analysis_prompts(segments);
         let mut combined = Analysis::default();
+        let mut successful_batches = 0usize;
         for (index, prompt) in prompts.iter().enumerate() {
-            let batch = self
-                .analyze_prompt(prompt, index + 1, prompts.len())
-                .await?;
-            combined.merge(batch);
+            match self.analyze_prompt(prompt, index + 1, prompts.len()).await {
+                Ok(batch) => {
+                    successful_batches += 1;
+                    combined.merge(batch);
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        batch = index + 1,
+                        total_batches = prompts.len(),
+                        error = %error,
+                        "skipping malformed inference batch"
+                    );
+                }
+            }
+        }
+        if successful_batches == 0 {
+            anyhow::bail!("all inference batches failed")
         }
         combined.sanitize();
         Ok(combined)
