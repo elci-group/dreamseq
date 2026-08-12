@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Dreamsequence Ltd
+// SPDX-License-Identifier: MIT
 use crate::report::Anthology;
 use anyhow::Result;
 use chrono::{Duration, Utc};

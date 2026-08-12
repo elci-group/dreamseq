@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Dreamsequence Ltd
+// SPDX-License-Identifier: MIT
 //! Deterministic Goblin boundaries for Dreamseq's probabilistic pipeline.
 
 use serde_json::Value;

@@ -1,0 +1,91 @@
+name: Signed release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive: tar.gz
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            archive: tar.gz
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive: zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Package Unix binary
+        if: matrix.archive == 'tar.gz'
+        shell: bash
+        run: |
+          mkdir -p staging
+          cp target/${{ matrix.target }}/release/dreamseq staging/
+          cp README.md LICENSE staging/
+          tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner -czf dreamseq-${{ github.ref_name }}-${{ matrix.target }}.tar.gz -C staging .
+      - name: Package Windows binary
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path staging
+          Copy-Item target/${{ matrix.target }}/release/dreamseq.exe staging/
+          Copy-Item README.md,LICENSE staging/
+          Compress-Archive -Path staging/* -DestinationPath dreamseq-${{ github.ref_name }}-${{ matrix.target }}.zip
+      - name: Generate SPDX SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: target/${{ matrix.target }}/release
+          artifact-name: dreamseq-${{ matrix.target }}.spdx.json
+          output-file: dreamseq-${{ matrix.target }}.spdx.json
+      - name: Checksum artifacts
+        shell: bash
+        run: sha256sum dreamseq-${{ github.ref_name }}-${{ matrix.target }}.* dreamseq-${{ matrix.target }}.spdx.json > dreamseq-${{ matrix.target }}.sha256
+      - name: Attest binaries and packages
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dreamseq-${{ github.ref_name }}-${{ matrix.target }}.*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dreamseq-${{ matrix.target }}
+          path: |
+            dreamseq-${{ github.ref_name }}-${{ matrix.target }}.*
+            dreamseq-${{ matrix.target }}.spdx.json
+            dreamseq-${{ matrix.target }}.sha256
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Verify checksums before publication
+        run: for manifest in artifacts/*.sha256; do (cd artifacts && sha256sum -c "$(basename "$manifest")"); done
+      - name: Publish immutable GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: artifacts/*

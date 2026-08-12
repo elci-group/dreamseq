@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Dreamsequence Ltd
+// SPDX-License-Identifier: MIT
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

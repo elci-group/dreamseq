@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Dreamsequence Ltd
+// SPDX-License-Identifier: MIT
 use crate::color::Colorize;
 use crate::report::{Anthology, CandidateTool, InterventionCategory, Priority};
 use anyhow::Result;
@@ -664,11 +666,13 @@ mod tests {
             project_version("0.1.1", 0.05),
             VersionProjection::NoChange
         ));
-        assert!(
-            matches!(project_version("0.1.1", 0.15), VersionProjection::Patch(v) if v == "0.1.2")
-        );
-        assert!(
-            matches!(project_version("0.1.1", 0.65), VersionProjection::Minor(v) if v == "0.2.0")
-        );
+        assert!(matches!(
+            project_version("0.1.1", 0.40),
+            VersionProjection::Patch(v) if v == "0.1.2"
+        ));
+        assert!(matches!(
+            project_version("0.1.1", 0.75),
+            VersionProjection::Minor(v) if v == "0.2.0"
+        ));
     }
 }

@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Dreamsequence Ltd
+// SPDX-License-Identifier: MIT
 use crate::config::DreamseqConfig;
 use crate::patterns::Pattern;
 use crate::steering::SteeringEvent;

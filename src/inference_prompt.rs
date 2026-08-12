@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Dreamsequence Ltd
+// SPDX-License-Identifier: MIT
 use super::{GroqClient, MAX_PROMPT_CHARS};
 use crate::segmentation::Segment;
 

@@ -1,0 +1,50 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+  "runs": [
+    {
+      "results": [],
+      "tool": {
+        "driver": {
+          "informationUri": "https://github.com/elci-group/amber",
+          "name": "amber",
+          "rules": [
+            {
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "fullDescription": {
+                "text": "Dependencies that are declared in Cargo.toml but have no imports or call sites in the project's source can be removed safely."
+              },
+              "help": {
+                "text": "Remove the unused dependency from Cargo.toml and run cargo check."
+              },
+              "id": "unused-dependency",
+              "name": "UnusedDependency",
+              "shortDescription": {
+                "text": "A dependency is declared but never used in source code."
+              }
+            },
+            {
+              "defaultConfiguration": {
+                "level": "note"
+              },
+              "fullDescription": {
+                "text": "Amber's safety classifier scored this dependency high enough that an automated or semi-automated replacement is recommended."
+              },
+              "help": {
+                "text": "Review the generated replacement proposal and run the validation checklist before merging."
+              },
+              "id": "replaceable-dependency",
+              "name": "ReplaceableDependency",
+              "shortDescription": {
+                "text": "A dependency is a strong candidate for replacement or removal."
+              }
+            }
+          ],
+          "version": "0.3.0"
+        }
+      }
+    }
+  ],
+  "version": "2.1.0"
+}

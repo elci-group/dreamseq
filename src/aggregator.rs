@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Dreamsequence Ltd
+// SPDX-License-Identifier: MIT
 use crate::config::HarnessConfig;
 use anyhow::{Context, Result};
 use chrono::{DateTime, NaiveDateTime, Utc};

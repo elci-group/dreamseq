@@ -1,8 +1,9 @@
 [package]
 name = "dreamseq"
-version = "1.3.11"
+version = "1.3.12"
 edition = "2024"
 license = "MIT"
+authors = ["Dreamsequence Ltd"]
 description = "Privacy-conscious engineering intelligence for human-AI collaboration"
 repository = "https://github.com/elci-group/dreamseq"
 readme = "README.md"

@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Dreamsequence Ltd
+// SPDX-License-Identifier: MIT
 use crate::aggregator::LogEntry;
 use crate::segmentation::Segment;
 use anyhow::Result;

@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Dreamsequence Ltd
+// SPDX-License-Identifier: MIT
 use crate::report::{Anthology, Priority};
 use anyhow::Result;
 use std::fs;

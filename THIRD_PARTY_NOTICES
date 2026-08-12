@@ -1,0 +1,203 @@
+# Third-Party Notices for dreamseq
+
+Project license: MIT
+
+| Dependency | Version | License | Source |
+|------------|---------|---------|--------|
+| anyhow | 1.0 | MIT OR Apache-2.0 | cargo |
+| chrono | 0.4 | MIT OR Apache-2.0 | cargo |
+| clap | 4.0 | MIT OR Apache-2.0 | cargo |
+| dirs | 5.0 | MIT OR Apache-2.0 | cargo |
+| json5 | 0.4 | NOASSERTION | cargo |
+| regex | 1.0 | MIT OR Apache-2.0 | cargo |
+| reqwest | 0.12 | MIT OR Apache-2.0 | cargo |
+| serde | 1.0 | MIT OR Apache-2.0 | cargo |
+| serde_json | 1.0 | MIT OR Apache-2.0 | cargo |
+| tokio | 1.0 | MIT OR Apache-2.0 | cargo |
+| toml | 0.8 | NOASSERTION | cargo |
+| tracing | 0.1 | NOASSERTION | cargo |
+| tracing-subscriber | 0.3 | NOASSERTION | cargo |
+| uuid | 1.0 | NOASSERTION | cargo |
+| walkdir | 2.0 | MIT OR Apache-2.0 | cargo |
+| aho-corasick | 1.1.5 | NOASSERTION | cargo |
+| android_system_properties | 0.1.6 | NOASSERTION | cargo |
+| anstream | 1.0.0 | NOASSERTION | cargo |
+| anstyle | 1.0.14 | NOASSERTION | cargo |
+| anstyle-parse | 1.0.0 | NOASSERTION | cargo |
+| anstyle-query | 1.1.5 | NOASSERTION | cargo |
+| anstyle-wincon | 3.0.11 | NOASSERTION | cargo |
+| atomic-waker | 1.1.2 | NOASSERTION | cargo |
+| autocfg | 1.5.1 | NOASSERTION | cargo |
+| base64 | 0.22.1 | NOASSERTION | cargo |
+| bitflags | 2.13.1 | NOASSERTION | cargo |
+| bumpalo | 3.20.3 | NOASSERTION | cargo |
+| bytes | 1.12.1 | NOASSERTION | cargo |
+| cc | 1.4.0 | NOASSERTION | cargo |
+| cfg-if | 1.0.4 | NOASSERTION | cargo |
+| cfg_aliases | 0.2.2 | NOASSERTION | cargo |
+| chacha20 | 0.10.1 | NOASSERTION | cargo |
+| clap_builder | 4.6.6 | NOASSERTION | cargo |
+| clap_derive | 4.6.4 | NOASSERTION | cargo |
+| clap_lex | 1.1.0 | NOASSERTION | cargo |
+| colorchoice | 1.0.5 | NOASSERTION | cargo |
+| core-foundation-sys | 0.8.7 | NOASSERTION | cargo |
+| cpufeatures | 0.3.0 | NOASSERTION | cargo |
+| dirs-sys | 0.4.1 | NOASSERTION | cargo |
+| displaydoc | 0.2.7 | NOASSERTION | cargo |
+| dreamseq | 1.3.11 | NOASSERTION | cargo |
+| equivalent | 1.0.2 | NOASSERTION | cargo |
+| find-msvc-tools | 0.1.9 | NOASSERTION | cargo |
+| form_urlencoded | 1.2.2 | NOASSERTION | cargo |
+| futures-channel | 0.3.33 | NOASSERTION | cargo |
+| futures-core | 0.3.33 | NOASSERTION | cargo |
+| futures-task | 0.3.33 | NOASSERTION | cargo |
+| futures-util | 0.3.33 | NOASSERTION | cargo |
+| getrandom | 0.2.17 | NOASSERTION | cargo |
+| hashbrown | 0.17.1 | NOASSERTION | cargo |
+| heck | 0.5.0 | NOASSERTION | cargo |
+| http | 1.5.0 | NOASSERTION | cargo |
+| http-body | 1.1.0 | NOASSERTION | cargo |
+| http-body-util | 0.1.4 | NOASSERTION | cargo |
+| httparse | 1.10.1 | NOASSERTION | cargo |
+| hyper | 1.11.0 | NOASSERTION | cargo |
+| hyper-rustls | 0.27.9 | NOASSERTION | cargo |
+| hyper-util | 0.1.20 | NOASSERTION | cargo |
+| iana-time-zone | 0.1.65 | NOASSERTION | cargo |
+| iana-time-zone-haiku | 0.1.2 | NOASSERTION | cargo |
+| icu_collections | 2.2.0 | NOASSERTION | cargo |
+| icu_locale_core | 2.2.0 | NOASSERTION | cargo |
+| icu_normalizer | 2.2.0 | NOASSERTION | cargo |
+| icu_normalizer_data | 2.2.0 | NOASSERTION | cargo |
+| icu_properties | 2.2.0 | NOASSERTION | cargo |
+| icu_properties_data | 2.2.0 | NOASSERTION | cargo |
+| icu_provider | 2.2.0 | NOASSERTION | cargo |
+| idna | 1.1.0 | NOASSERTION | cargo |
+| idna_adapter | 1.2.2 | NOASSERTION | cargo |
+| indexmap | 2.14.0 | NOASSERTION | cargo |
+| ipnet | 2.12.1 | NOASSERTION | cargo |
+| is_terminal_polyfill | 1.70.2 | NOASSERTION | cargo |
+| itoa | 1.0.18 | NOASSERTION | cargo |
+| js-sys | 0.3.103 | NOASSERTION | cargo |
+| lazy_static | 1.5.0 | NOASSERTION | cargo |
+| libc | 0.2.189 | NOASSERTION | cargo |
+| libredox | 0.1.19 | NOASSERTION | cargo |
+| litemap | 0.8.2 | NOASSERTION | cargo |
+| log | 0.4.33 | NOASSERTION | cargo |
+| lru-slab | 0.1.2 | NOASSERTION | cargo |
+| matchers | 0.2.0 | NOASSERTION | cargo |
+| memchr | 2.8.3 | NOASSERTION | cargo |
+| mio | 1.2.2 | NOASSERTION | cargo |
+| nu-ansi-term | 0.50.3 | NOASSERTION | cargo |
+| num-traits | 0.2.19 | NOASSERTION | cargo |
+| once_cell | 1.21.4 | NOASSERTION | cargo |
+| once_cell_polyfill | 1.70.2 | NOASSERTION | cargo |
+| option-ext | 0.2.0 | NOASSERTION | cargo |
+| percent-encoding | 2.3.2 | NOASSERTION | cargo |
+| pest | 2.8.8 | NOASSERTION | cargo |
+| pest_derive | 2.8.8 | NOASSERTION | cargo |
+| pest_generator | 2.8.8 | NOASSERTION | cargo |
+| pest_meta | 2.8.8 | NOASSERTION | cargo |
+| pin-project-lite | 0.2.17 | NOASSERTION | cargo |
+| potential_utf | 0.1.5 | NOASSERTION | cargo |
+| proc-macro2 | 1.0.107 | NOASSERTION | cargo |
+| quinn | 0.11.11 | NOASSERTION | cargo |
+| quinn-proto | 0.11.16 | NOASSERTION | cargo |
+| quinn-udp | 0.5.15 | NOASSERTION | cargo |
+| quote | 1.0.47 | NOASSERTION | cargo |
+| r-efi | 6.0.0 | NOASSERTION | cargo |
+| rand | 0.10.2 | MIT OR Apache-2.0 | cargo |
+| rand_core | 0.10.1 | NOASSERTION | cargo |
+| rand_pcg | 0.10.2 | NOASSERTION | cargo |
+| redox_users | 0.4.6 | NOASSERTION | cargo |
+| regex-automata | 0.4.18 | NOASSERTION | cargo |
+| regex-syntax | 0.8.11 | NOASSERTION | cargo |
+| ring | 0.17.14 | NOASSERTION | cargo |
+| rustc-hash | 2.1.3 | NOASSERTION | cargo |
+| rustls | 0.23.43 | NOASSERTION | cargo |
+| rustls-pki-types | 1.15.1 | NOASSERTION | cargo |
+| rustls-webpki | 0.103.13 | NOASSERTION | cargo |
+| rustversion | 1.0.23 | NOASSERTION | cargo |
+| ryu | 1.0.23 | NOASSERTION | cargo |
+| same-file | 1.0.6 | NOASSERTION | cargo |
+| serde_core | 1.0.229 | NOASSERTION | cargo |
+| serde_derive | 1.0.229 | NOASSERTION | cargo |
+| serde_spanned | 0.6.9 | NOASSERTION | cargo |
+| serde_urlencoded | 0.7.1 | NOASSERTION | cargo |
+| sharded-slab | 0.1.7 | NOASSERTION | cargo |
+| shlex | 2.0.1 | NOASSERTION | cargo |
+| slab | 0.4.12 | NOASSERTION | cargo |
+| smallvec | 1.15.2 | NOASSERTION | cargo |
+| socket2 | 0.6.5 | NOASSERTION | cargo |
+| stable_deref_trait | 1.2.1 | NOASSERTION | cargo |
+| strsim | 0.11.1 | NOASSERTION | cargo |
+| subtle | 2.6.1 | NOASSERTION | cargo |
+| syn | 2.0.119 | NOASSERTION | cargo |
+| sync_wrapper | 1.0.2 | NOASSERTION | cargo |
+| synstructure | 0.13.2 | NOASSERTION | cargo |
+| thiserror | 1.0.69 | MIT OR Apache-2.0 | cargo |
+| thiserror-impl | 1.0.69 | NOASSERTION | cargo |
+| thread_local | 1.1.10 | NOASSERTION | cargo |
+| tinystr | 0.8.3 | NOASSERTION | cargo |
+| tinyvec | 1.12.0 | NOASSERTION | cargo |
+| tinyvec_macros | 0.1.1 | NOASSERTION | cargo |
+| tokio-macros | 2.7.2 | NOASSERTION | cargo |
+| tokio-rustls | 0.26.4 | NOASSERTION | cargo |
+| toml_datetime | 0.6.11 | NOASSERTION | cargo |
+| toml_edit | 0.22.27 | NOASSERTION | cargo |
+| toml_write | 0.1.2 | NOASSERTION | cargo |
+| tower | 0.5.3 | NOASSERTION | cargo |
+| tower-http | 0.6.11 | NOASSERTION | cargo |
+| tower-layer | 0.3.3 | NOASSERTION | cargo |
+| tower-service | 0.3.3 | NOASSERTION | cargo |
+| tracing-attributes | 0.1.31 | NOASSERTION | cargo |
+| tracing-core | 0.1.36 | NOASSERTION | cargo |
+| tracing-log | 0.2.0 | NOASSERTION | cargo |
+| try-lock | 0.2.5 | NOASSERTION | cargo |
+| ucd-trie | 0.1.7 | NOASSERTION | cargo |
+| unicode-ident | 1.0.24 | NOASSERTION | cargo |
+| untrusted | 0.9.0 | NOASSERTION | cargo |
+| url | 2.5.8 | NOASSERTION | cargo |
+| utf8_iter | 1.0.4 | NOASSERTION | cargo |
+| utf8parse | 0.2.2 | NOASSERTION | cargo |
+| valuable | 0.1.1 | NOASSERTION | cargo |
+| want | 0.3.1 | NOASSERTION | cargo |
+| wasi | 0.11.1+wasi-snapshot-preview1 | NOASSERTION | cargo |
+| wasm-bindgen | 0.2.126 | NOASSERTION | cargo |
+| wasm-bindgen-futures | 0.4.76 | NOASSERTION | cargo |
+| wasm-bindgen-macro | 0.2.126 | NOASSERTION | cargo |
+| wasm-bindgen-macro-support | 0.2.126 | NOASSERTION | cargo |
+| wasm-bindgen-shared | 0.2.126 | NOASSERTION | cargo |
+| web-sys | 0.3.103 | NOASSERTION | cargo |
+| web-time | 1.1.0 | NOASSERTION | cargo |
+| webpki-roots | 1.0.9 | NOASSERTION | cargo |
+| winapi-util | 0.1.11 | NOASSERTION | cargo |
+| windows-core | 0.62.2 | NOASSERTION | cargo |
+| windows-implement | 0.60.2 | NOASSERTION | cargo |
+| windows-interface | 0.59.3 | NOASSERTION | cargo |
+| windows-link | 0.2.1 | NOASSERTION | cargo |
+| windows-result | 0.4.1 | NOASSERTION | cargo |
+| windows-strings | 0.5.1 | NOASSERTION | cargo |
+| windows-sys | 0.48.0 | NOASSERTION | cargo |
+| windows-targets | 0.48.5 | NOASSERTION | cargo |
+| windows_aarch64_gnullvm | 0.48.5 | NOASSERTION | cargo |
+| windows_aarch64_msvc | 0.48.5 | NOASSERTION | cargo |
+| windows_i686_gnu | 0.48.5 | NOASSERTION | cargo |
+| windows_i686_gnullvm | 0.52.6 | NOASSERTION | cargo |
+| windows_i686_msvc | 0.48.5 | NOASSERTION | cargo |
+| windows_x86_64_gnu | 0.48.5 | NOASSERTION | cargo |
+| windows_x86_64_gnullvm | 0.48.5 | NOASSERTION | cargo |
+| windows_x86_64_msvc | 0.48.5 | NOASSERTION | cargo |
+| winnow | 0.7.15 | NOASSERTION | cargo |
+| writeable | 0.6.3 | NOASSERTION | cargo |
+| yoke | 0.8.3 | NOASSERTION | cargo |
+| yoke-derive | 0.8.2 | NOASSERTION | cargo |
+| zerofrom | 0.1.8 | NOASSERTION | cargo |
+| zerofrom-derive | 0.1.7 | NOASSERTION | cargo |
+| zeroize | 1.9.0 | NOASSERTION | cargo |
+| zerotrie | 0.2.4 | NOASSERTION | cargo |
+| zerovec | 0.11.6 | NOASSERTION | cargo |
+| zerovec-derive | 0.11.3 | NOASSERTION | cargo |
+| zmij | 1.0.23 | NOASSERTION | cargo |
+
+---
+Generated by lwoodz. Review licenses for compliance before distribution.

@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Dreamsequence Ltd
+// SPDX-License-Identifier: MIT
 pub use crate::analysis::{
     Analysis, AutomationOpportunity, ContextLoss, HarnessFriction, MissingTool, ModelFailure,
     RepeatedCommand, RepeatedPrompt, WorkflowBottleneck,

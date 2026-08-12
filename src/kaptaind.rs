@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Dreamsequence Ltd
+// SPDX-License-Identifier: MIT
 use anyhow::Result;
 use std::path::PathBuf;
 use std::process::Command;

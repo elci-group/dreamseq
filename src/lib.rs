@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Dreamsequence Ltd
+// SPDX-License-Identifier: MIT
 pub mod aggregator;
 pub mod analysis;
 pub mod bound;

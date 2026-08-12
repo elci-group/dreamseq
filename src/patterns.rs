@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Dreamsequence Ltd
+// SPDX-License-Identifier: MIT
 use crate::groq::Analysis;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};

@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Dreamsequence Ltd
+// SPDX-License-Identifier: MIT
 use dreamseq::DreamseqConfig;
 use std::fs;
 use std::process::Command;

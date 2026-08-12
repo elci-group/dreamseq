@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Dreamsequence Ltd
+// SPDX-License-Identifier: MIT
 //! Minimal terminal styling used by the human-readable renderer.
 
 const RESET: &str = "\x1b[0m";

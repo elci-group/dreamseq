@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Dreamsequence Ltd
+// SPDX-License-Identifier: MIT
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use dreamseq::cloud::{CloudClient, CredentialStore};

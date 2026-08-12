@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Dreamsequence Ltd
+// SPDX-License-Identifier: MIT
 use chrono::{DateTime, Duration, Utc};
 use dreamseq::DreamseqConfig;
 use dreamseq::aggregator::{LogEntry, LogMetadata};

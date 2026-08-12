@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Dreamsequence Ltd
+// SPDX-License-Identifier: MIT
 use chrono::Utc;
 use dreamseq::present::{
     AnalysisSummary, CompletionReport, DaemonState, HumanRenderer, Intervention, JsonRenderer,

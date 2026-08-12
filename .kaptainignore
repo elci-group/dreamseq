@@ -7,3 +7,7 @@
 
 # Rust
 target
+artifacts
+.env
+.env.*
+*.log

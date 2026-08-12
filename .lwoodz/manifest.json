@@ -1,0 +1,1385 @@
+{
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "creationInfo": {
+    "created": "2026-08-12T21:47:11.986410898+00:00",
+    "creators": [
+      "Tool: lwoodz-0.1.0",
+      "Person: Dreamsequence Ltd"
+    ]
+  },
+  "dataLicense": "CC0-1.0",
+  "dependencies": [
+    {
+      "license": "MIT OR Apache-2.0",
+      "name": "anyhow",
+      "source": "cargo",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "1.0"
+    },
+    {
+      "license": "MIT OR Apache-2.0",
+      "name": "chrono",
+      "source": "cargo",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "0.4"
+    },
+    {
+      "license": "MIT OR Apache-2.0",
+      "name": "clap",
+      "source": "cargo",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "4.0"
+    },
+    {
+      "license": "MIT OR Apache-2.0",
+      "name": "dirs",
+      "source": "cargo",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "5.0"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "json5",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.4"
+    },
+    {
+      "license": "MIT OR Apache-2.0",
+      "name": "regex",
+      "source": "cargo",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "1.0"
+    },
+    {
+      "license": "MIT OR Apache-2.0",
+      "name": "reqwest",
+      "source": "cargo",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "0.12"
+    },
+    {
+      "license": "MIT OR Apache-2.0",
+      "name": "serde",
+      "source": "cargo",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "1.0"
+    },
+    {
+      "license": "MIT OR Apache-2.0",
+      "name": "serde_json",
+      "source": "cargo",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "1.0"
+    },
+    {
+      "license": "MIT OR Apache-2.0",
+      "name": "tokio",
+      "source": "cargo",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "1.0"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "toml",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.8"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "tracing",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.1"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "tracing-subscriber",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.3"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "uuid",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "1.0"
+    },
+    {
+      "license": "MIT OR Apache-2.0",
+      "name": "walkdir",
+      "source": "cargo",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "2.0"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "aho-corasick",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "1.1.5"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "android_system_properties",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.1.6"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "anstream",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "1.0.0"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "anstyle",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "1.0.14"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "anstyle-parse",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "1.0.0"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "anstyle-query",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "1.1.5"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "anstyle-wincon",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "3.0.11"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "atomic-waker",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "1.1.2"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "autocfg",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "1.5.1"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "base64",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.22.1"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "bitflags",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "2.13.1"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "bumpalo",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "3.20.3"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "bytes",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "1.12.1"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "cc",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "1.4.0"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "cfg-if",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "1.0.4"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "cfg_aliases",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.2.2"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "chacha20",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.10.1"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "clap_builder",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "4.6.6"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "clap_derive",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "4.6.4"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "clap_lex",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "1.1.0"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "colorchoice",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "1.0.5"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "core-foundation-sys",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.8.7"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "cpufeatures",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.3.0"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "dirs-sys",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.4.1"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "displaydoc",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.2.7"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "dreamseq",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "1.3.11"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "equivalent",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "1.0.2"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "find-msvc-tools",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.1.9"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "form_urlencoded",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "1.2.2"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "futures-channel",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.3.33"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "futures-core",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.3.33"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "futures-task",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.3.33"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "futures-util",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.3.33"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "getrandom",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.2.17"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "hashbrown",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.17.1"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "heck",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.5.0"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "http",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "1.5.0"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "http-body",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "1.1.0"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "http-body-util",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.1.4"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "httparse",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "1.10.1"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "hyper",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "1.11.0"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "hyper-rustls",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.27.9"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "hyper-util",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.1.20"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "iana-time-zone",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.1.65"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "iana-time-zone-haiku",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.1.2"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "icu_collections",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "2.2.0"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "icu_locale_core",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "2.2.0"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "icu_normalizer",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "2.2.0"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "icu_normalizer_data",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "2.2.0"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "icu_properties",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "2.2.0"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "icu_properties_data",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "2.2.0"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "icu_provider",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "2.2.0"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "idna",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "1.1.0"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "idna_adapter",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "1.2.2"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "indexmap",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "2.14.0"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "ipnet",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "2.12.1"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "is_terminal_polyfill",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "1.70.2"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "itoa",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "1.0.18"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "js-sys",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.3.103"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "lazy_static",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "1.5.0"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "libc",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.2.189"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "libredox",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.1.19"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "litemap",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.8.2"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "log",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.4.33"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "lru-slab",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.1.2"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "matchers",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.2.0"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "memchr",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "2.8.3"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "mio",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "1.2.2"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "nu-ansi-term",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.50.3"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "num-traits",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.2.19"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "once_cell",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "1.21.4"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "once_cell_polyfill",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "1.70.2"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "option-ext",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.2.0"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "percent-encoding",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "2.3.2"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "pest",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "2.8.8"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "pest_derive",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "2.8.8"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "pest_generator",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "2.8.8"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "pest_meta",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "2.8.8"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "pin-project-lite",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.2.17"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "potential_utf",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.1.5"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "proc-macro2",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "1.0.107"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "quinn",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.11.11"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "quinn-proto",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.11.16"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "quinn-udp",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.5.15"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "quote",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "1.0.47"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "r-efi",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "6.0.0"
+    },
+    {
+      "license": "MIT OR Apache-2.0",
+      "name": "rand",
+      "source": "cargo",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "0.10.2"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "rand_core",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.10.1"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "rand_pcg",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.10.2"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "redox_users",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.4.6"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "regex-automata",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.4.18"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "regex-syntax",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.8.11"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "ring",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.17.14"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "rustc-hash",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "2.1.3"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "rustls",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.23.43"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "rustls-pki-types",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "1.15.1"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "rustls-webpki",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.103.13"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "rustversion",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "1.0.23"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "ryu",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "1.0.23"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "same-file",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "1.0.6"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "serde_core",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "1.0.229"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "serde_derive",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "1.0.229"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "serde_spanned",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.6.9"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "serde_urlencoded",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.7.1"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "sharded-slab",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.1.7"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "shlex",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "2.0.1"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "slab",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.4.12"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "smallvec",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "1.15.2"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "socket2",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.6.5"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "stable_deref_trait",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "1.2.1"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "strsim",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.11.1"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "subtle",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "2.6.1"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "syn",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "2.0.119"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "sync_wrapper",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "1.0.2"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "synstructure",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.13.2"
+    },
+    {
+      "license": "MIT OR Apache-2.0",
+      "name": "thiserror",
+      "source": "cargo",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "1.0.69"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "thiserror-impl",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "1.0.69"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "thread_local",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "1.1.10"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "tinystr",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.8.3"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "tinyvec",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "1.12.0"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "tinyvec_macros",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.1.1"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "tokio-macros",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "2.7.2"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "tokio-rustls",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.26.4"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "toml_datetime",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.6.11"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "toml_edit",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.22.27"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "toml_write",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.1.2"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "tower",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.5.3"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "tower-http",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.6.11"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "tower-layer",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.3.3"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "tower-service",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.3.3"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "tracing-attributes",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.1.31"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "tracing-core",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.1.36"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "tracing-log",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.2.0"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "try-lock",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.2.5"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "ucd-trie",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.1.7"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "unicode-ident",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "1.0.24"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "untrusted",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.9.0"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "url",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "2.5.8"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "utf8_iter",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "1.0.4"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "utf8parse",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.2.2"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "valuable",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.1.1"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "want",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.3.1"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "wasi",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.11.1+wasi-snapshot-preview1"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "wasm-bindgen",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.2.126"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "wasm-bindgen-futures",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.4.76"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "wasm-bindgen-macro",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.2.126"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "wasm-bindgen-macro-support",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.2.126"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "wasm-bindgen-shared",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.2.126"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "web-sys",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.3.103"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "web-time",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "1.1.0"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "webpki-roots",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "1.0.9"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "winapi-util",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.1.11"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "windows-core",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.62.2"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "windows-implement",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.60.2"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "windows-interface",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.59.3"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "windows-link",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.2.1"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "windows-result",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.4.1"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "windows-strings",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.5.1"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "windows-sys",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.48.0"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "windows-targets",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.48.5"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "windows_aarch64_gnullvm",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.48.5"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "windows_aarch64_msvc",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.48.5"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "windows_i686_gnu",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.48.5"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "windows_i686_gnullvm",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.52.6"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "windows_i686_msvc",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.48.5"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "windows_x86_64_gnu",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.48.5"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "windows_x86_64_gnullvm",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.48.5"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "windows_x86_64_msvc",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.48.5"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "winnow",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.7.15"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "writeable",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.6.3"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "yoke",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.8.3"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "yoke-derive",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.8.2"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "zerofrom",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.1.8"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "zerofrom-derive",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.1.7"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "zeroize",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "1.9.0"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "zerotrie",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.2.4"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "zerovec",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.11.6"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "zerovec-derive",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "0.11.3"
+    },
+    {
+      "license": "NOASSERTION",
+      "name": "zmij",
+      "source": "cargo",
+      "spdx": "NOASSERTION",
+      "version": "1.0.23"
+    }
+  ],
+  "documentNamespace": "https://example.com/spdx/dreamseq",
+  "generatedBy": "lwoodz 0.1.0",
+  "name": "dreamseq",
+  "packages": [
+    {
+      "SPDXID": "SPDXRef-Package",
+      "copyrightText": "Copyright (c) 2026 Dreamsequence Ltd",
+      "downloadLocation": "NOASSERTION",
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "name": "dreamseq"
+    }
+  ],
+  "spdxVersion": "SPDX-2.3"
+}

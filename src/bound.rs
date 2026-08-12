@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Dreamsequence Ltd
+// SPDX-License-Identifier: MIT
 use crate::aggregator::{LogEntry, LogMetadata};
 use crate::config::HarnessConfig;
 use anyhow::Result;

@@ -38,5 +38,16 @@ jobs:
       - name: Audit dependencies
         run: cargo audit
 
+      - name: Check dependency licenses and sources
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check licenses sources
+
+      - name: Verify licensing metadata and SPDX headers
+        run: bash scripts/license-gate.sh
+
+      - name: Run Amber policy analysis
+        run: amber --format sarif analyze --output amber.sarif
+
       - name: Verify distributable package
         run: cargo package --locked

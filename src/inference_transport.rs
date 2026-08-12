@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Dreamsequence Ltd
+// SPDX-License-Identifier: MIT
 use super::{
     CloudInferenceResponse, GroqClient, InferenceOutput, InferenceRequest, InferenceRoute,
     MAX_ATTEMPTS, OpenAiResponse,

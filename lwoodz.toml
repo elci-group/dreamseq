@@ -1,0 +1,42 @@
+# Lwoodz licensing policy for Dreamseq.
+
+[project]
+license = "MIT"
+copyright_holder = "Dreamsequence Ltd"
+copyright_year = 2026
+project_name = "dreamseq"
+
+[operation]
+mode = "enforce"
+
+[watch]
+path = "."
+recursive = true
+ignore_file = ".lwoodignore"
+
+[generate]
+license_file = "LICENSE"
+notice_file = "NOTICE"
+copyright_file = "COPYRIGHT"
+attribution_file = "THIRD_PARTY_NOTICES"
+overwrite = false
+
+[headers]
+enabled = true
+insert_spdx = true
+exclude = ["target/**", "dist/**", ".git/**", ".lwoodz/**", "vendor/**"]
+include = ["src/**", "tests/**"]
+
+[compatibility]
+enforce = true
+policy = "permissive"
+
+[spdx]
+produce_manifest = true
+manifest_path = ".lwoodz/manifest.json"
+include_transitive = true
+
+[audit]
+enabled = true
+log_path = ".lwoodz/audit.jsonl"
+fail_on_incompatible = true

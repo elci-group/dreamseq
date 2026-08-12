@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Dreamsequence Ltd
+// SPDX-License-Identifier: MIT
 use anyhow::{Context, Result};
 use std::fs::{self, OpenOptions};
 use std::io::Write;

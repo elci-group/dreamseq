@@ -1,0 +1,15 @@
+# Amber policy: license safety is a release constraint, not a replacement bonus.
+threshold = 70
+
+[policy]
+required = ["serde", "tokio", "reqwest"]
+forbidden = ["goblin"]
+strict = true
+
+[weights]
+usage_simplicity = 0.20
+transitive_value = 0.15
+security_safety = 0.30
+maintenance_burden = 0.15
+testability = 0.10
+api_surface = 0.10

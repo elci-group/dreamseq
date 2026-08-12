@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Dreamsequence Ltd
+// SPDX-License-Identifier: MIT
 use crate::goblin_gateway::{GatewayDecision, validate_run_envelope};
 use crate::report::{Anthology, CandidateTool, Priority};
 use anyhow::{Context, Result};

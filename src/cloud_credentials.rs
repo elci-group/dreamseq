@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Dreamsequence Ltd
+// SPDX-License-Identifier: MIT
 use super::{CredentialStore, Credentials};
 use anyhow::{Context, Result};
 use std::fs;
