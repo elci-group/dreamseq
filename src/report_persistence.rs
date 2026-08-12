@@ -9,7 +9,7 @@ pub(crate) fn save(anthology: &Anthology) -> Result<PathBuf> {
     let path = anthology.config.anthologies_dir.join(filename);
     let content = serde_json::to_string_pretty(anthology)?;
     crate::fs_security::write_private_atomic(&path, content.as_bytes())?;
-    tracing::info!("Saved anthology to {:?}", path);
+    tracing::info!(path = %path.display(), anthology_id = %anthology.id, "saved anthology");
     Ok(path)
 }
 
@@ -25,9 +25,14 @@ pub(crate) fn save_dreams(anthology: &Anthology, repository: &Path) -> Result<Pa
                 Err(error)
                     if error
                         .downcast_ref::<std::io::Error>()
-                        .is_some_and(|error| error.kind() == std::io::ErrorKind::AlreadyExists) => {
+                        .is_some_and(|error| error.kind() == std::io::ErrorKind::AlreadyExists) =>
+                {
+                    tracing::debug!(path = %path.display(), "Dreams lifecycle file already exists");
                 }
-                Err(error) => return Err(error),
+                Err(error) => {
+                    tracing::error!(path = %path.display(), error = %error, "failed to initialize Dreams lifecycle file");
+                    return Err(error);
+                }
             }
         }
     }

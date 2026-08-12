@@ -1,5 +1,5 @@
-use crate::report::{Anthology, CandidateTool, Priority};
 use crate::goblin_gateway::{GatewayDecision, validate_run_envelope};
+use crate::report::{Anthology, CandidateTool, Priority};
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use reqwest::{Client, StatusCode};
@@ -60,8 +60,14 @@ impl CredentialStore {
                 serde_json::from_slice(&bytes)
                     .context("stored Dreamsequence credentials are invalid")?,
             )),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(error) => Err(error.into()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                tracing::debug!(path = %self.path.display(), "Dreamsequence credentials are not present");
+                Ok(None)
+            }
+            Err(error) => {
+                tracing::error!(path = %self.path.display(), error = %error, "failed to read Dreamsequence credentials");
+                Err(error.into())
+            }
         }
     }
 
@@ -81,8 +87,14 @@ impl CredentialStore {
     pub fn remove(&self) -> Result<bool> {
         match fs::remove_file(&self.path) {
             Ok(()) => Ok(true),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-            Err(error) => Err(error.into()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                tracing::debug!(path = %self.path.display(), "Dreamsequence credentials were already absent");
+                Ok(false)
+            }
+            Err(error) => {
+                tracing::error!(path = %self.path.display(), error = %error, "failed to remove Dreamsequence credentials");
+                Err(error.into())
+            }
         }
     }
 }
@@ -227,6 +239,7 @@ impl CloudClient {
         let base_url = normalize_api_url(
             api_url
                 .map(str::to_owned)
+                // traci: allow -- an absent optional environment override is expected control flow.
                 .or_else(|| std::env::var("DREAMSEQUENCE_API_URL").ok())
                 .unwrap_or_else(|| DEFAULT_API_URL.to_string()),
         )?;
@@ -410,6 +423,7 @@ fn parse_hours(value: &str) -> f64 {
     value
         .split(|character: char| !(character.is_ascii_digit() || character == '.'))
         .find_map(|part| {
+            // traci: allow -- non-numeric fragments are expected while scanning prose.
             (!part.is_empty())
                 .then(|| part.parse::<f64>().ok())
                 .flatten()

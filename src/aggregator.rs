@@ -134,6 +134,7 @@ impl LogAggregator {
                     report.entries_accepted = entries.len();
                     (entries, report)
                 }
+                // traci: allow -- branch emits harness, path, and error below.
                 Err(error) => {
                     report.files_failed = 1;
                     report.warnings.push(error.to_string());
@@ -166,6 +167,7 @@ impl LogAggregator {
                     report.files_seen += 1;
                     match self.parse_log_file(entry.path(), harness).await {
                         Ok(log_entries) => entries.extend(log_entries),
+                        // traci: allow -- branch emits harness, path, and error below.
                         Err(error) => {
                             report.files_failed += 1;
                             let warning = format!("{}: {error}", entry.path().display());
@@ -180,6 +182,7 @@ impl LogAggregator {
                     }
                 }
                 Ok(_) => {}
+                // traci: allow -- traversal failures are recorded with harness and error.
                 Err(error) => {
                     report.files_failed += 1;
                     report.warnings.push(error.to_string());
@@ -432,6 +435,7 @@ fn file_timestamp(path: &Path) -> DateTime<Utc> {
 
 fn parse_json_timestamp(value: &serde_json::Value) -> Option<DateTime<Utc>> {
     if let Some(text) = value.as_str() {
+        // traci: allow -- inspect_err records the rejected timestamp and parser error.
         return DateTime::parse_from_rfc3339(text)
             .map(|dt| dt.with_timezone(&Utc))
             .inspect_err(|error| {

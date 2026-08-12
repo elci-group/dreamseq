@@ -84,6 +84,7 @@ impl BoundClient {
 
         let status = command.status()?;
         if !status.success() {
+            // traci: allow -- cleanup failure is logged with path and error below.
             if let Err(error) = std::fs::remove_dir_all(&temp_dir)
                 && error.kind() != std::io::ErrorKind::NotFound
             {

@@ -211,13 +211,18 @@ impl GroqClient {
                         return Ok(analysis);
                     }
                     Err(error) => {
+                        tracing::warn!(batch, provider = "dreamsequence", error = %error, "server inference returned invalid analysis");
                         failures.push(format!("dreamsequence: invalid analysis ({error})"))
                     }
                 },
-                Err(error) => failures.push(format!("dreamsequence: {error}")),
+                Err(error) => {
+                    tracing::warn!(batch, provider = "dreamsequence", error = %error, "server inference request failed");
+                    failures.push(format!("dreamsequence: {error}"));
+                }
             }
             tracing::warn!(
-                batch,
+                batch = batch,
+                fallback = "byok",
                 "Dreamsequence inference unavailable; trying BYOK routes"
             );
         }
@@ -236,10 +241,14 @@ impl GroqClient {
                         return Ok(analysis);
                     }
                     Err(error) => {
+                        tracing::warn!(batch, provider = %route.name, error = %error, "BYOK inference returned invalid analysis");
                         failures.push(format!("{}: invalid analysis ({error})", route.name))
                     }
                 },
-                Err(error) => failures.push(format!("{}: {error}", route.name)),
+                Err(error) => {
+                    tracing::warn!(batch, provider = %route.name, error = %error, "BYOK inference request failed");
+                    failures.push(format!("{}: {error}", route.name));
+                }
             }
         }
 
@@ -416,11 +425,14 @@ impl GroqClient {
         let normalized = normalize_analysis_json(json_str);
         let mut value: serde_json::Value = match serde_json::from_str(&normalized) {
             Ok(value) => value,
-            Err(json_error) => json5::from_str(&normalized).map_err(|json5_error| {
-                anyhow::anyhow!(
-                    "invalid analysis JSON ({json_error}; JSON5 fallback: {json5_error})"
-                )
-            })?,
+            Err(json_error) => {
+                tracing::debug!(error = %json_error, "strict JSON parse failed; trying JSON5 compatibility parser");
+                json5::from_str(&normalized).map_err(|json5_error| {
+                    anyhow::anyhow!(
+                        "invalid analysis JSON ({json_error}; JSON5 fallback: {json5_error})"
+                    )
+                })?
+            }
         };
         normalize_analysis_items(&mut value);
         coerce_analysis_scalars(&mut value);
@@ -810,6 +822,7 @@ fn parse_numeric_string(value: &str) -> Option<f64> {
     if let Ok(number) = normalized.parse::<f64>() {
         return Some(number);
     }
+    // traci: allow -- parse failure is expected while identifying a leading numeric fragment.
     let leading_digits = normalized
         .split(|character: char| !character.is_ascii_digit() && character != '.')
         .find(|part| !part.is_empty())

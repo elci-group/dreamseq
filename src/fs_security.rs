@@ -33,7 +33,11 @@ pub(crate) fn write_private_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     })();
 
     if result.is_err() {
-        let _ = fs::remove_file(&temporary);
+        if let Err(error) = fs::remove_file(&temporary)
+            && error.kind() != std::io::ErrorKind::NotFound
+        {
+            tracing::warn!(path = %temporary.display(), error = %error, "failed to remove private temporary file");
+        }
     }
     result
 }

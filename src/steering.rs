@@ -29,39 +29,99 @@ pub enum SteeringCategory {
 }
 
 static MISSING_TOOL_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
-    compile_patterns("missing_tool", &[r"i wish i had", r"we need a tool for", r"there should be a command", r"missing.*tool", r"would be nice if.*could"])
+    compile_patterns(
+        "missing_tool",
+        &[
+            r"i wish i had",
+            r"we need a tool for",
+            r"there should be a command",
+            r"missing.*tool",
+            r"would be nice if.*could",
+        ],
+    )
 });
 
 static MISSING_CONTEXT_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
-    compile_patterns("missing_context", &[r"we already decided", r"you forgot", r"as i mentioned", r"remember that", r"we discussed", r"losing context"])
+    compile_patterns(
+        "missing_context",
+        &[
+            r"we already decided",
+            r"you forgot",
+            r"as i mentioned",
+            r"remember that",
+            r"we discussed",
+            r"losing context",
+        ],
+    )
 });
 
 static WRONG_ABSTRACTION_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
-    compile_patterns("wrong_abstraction", &[r"that's not what i asked", r"you're solving the wrong problem", r"wrong approach", r"not the right abstraction", r"misunderstood the requirement"])
+    compile_patterns(
+        "wrong_abstraction",
+        &[
+            r"that's not what i asked",
+            r"you're solving the wrong problem",
+            r"wrong approach",
+            r"not the right abstraction",
+            r"misunderstood the requirement",
+        ],
+    )
 });
 
 static EXCESS_VERBOSITY_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
-    compile_patterns("excess_verbosity", &[r"be more concise", r"too verbose", r"\bshorter\b", r"get to the point", r"less detail", r"keep it brief"])
+    compile_patterns(
+        "excess_verbosity",
+        &[
+            r"be more concise",
+            r"too verbose",
+            r"\bshorter\b",
+            r"get to the point",
+            r"less detail",
+            r"keep it brief",
+        ],
+    )
 });
 
 static HALLUCINATION_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
-    compile_patterns("hallucination", &[r"that.*doesn't exist", r"no such.*api", r"that command doesn't", r"\binvented\b", r"\bhallucinated\b", r"not a real"])
+    compile_patterns(
+        "hallucination",
+        &[
+            r"that.*doesn't exist",
+            r"no such.*api",
+            r"that command doesn't",
+            r"\binvented\b",
+            r"\bhallucinated\b",
+            r"not a real",
+        ],
+    )
 });
 
 static ARCHITECTURAL_MISMATCH_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
-    compile_patterns("architectural_mismatch", &[r"doesn't fit the workflow", r"architectural mismatch", r"wrong for this use case", r"doesn't scale", r"not the right fit"])
+    compile_patterns(
+        "architectural_mismatch",
+        &[
+            r"doesn't fit the workflow",
+            r"architectural mismatch",
+            r"wrong for this use case",
+            r"doesn't scale",
+            r"not the right fit",
+        ],
+    )
 });
 
 static MANUAL_REPETITION_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
-    compile_patterns("manual_repetition", &[
-        // Match "again" only when it's tied to an action, avoiding stray words
-        // like "... failed again" in telemetry noise.
-        r"\b(?:do|run|execute|perform|say|write|try)\s+(?:it|that|this)\s+again\b",
-        r"\brepeat(?:\s+(?:that|this|it|the\s+\w+))?\b",
-        r"\bsame as before\b",
-        r"\bdo it again\b",
-        r"\blike last time\b",
-    ])
+    compile_patterns(
+        "manual_repetition",
+        &[
+            // Match "again" only when it's tied to an action, avoiding stray words
+            // like "... failed again" in telemetry noise.
+            r"\b(?:do|run|execute|perform|say|write|try)\s+(?:it|that|this)\s+again\b",
+            r"\brepeat(?:\s+(?:that|this|it|the\s+\w+))?\b",
+            r"\bsame as before\b",
+            r"\bdo it again\b",
+            r"\blike last time\b",
+        ],
+    )
 });
 
 fn compile_patterns(group: &'static str, patterns: &[&'static str]) -> Vec<Regex> {
