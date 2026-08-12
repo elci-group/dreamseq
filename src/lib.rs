@@ -86,13 +86,16 @@ impl Dreamseq {
 
     /// Run the complete Dreamseq pipeline
     pub async fn run(&self) -> Result<Anthology> {
-        tracing::info!("Starting Dreamseq pipeline");
+        tracing::info!(
+            harnesses = self.config.harnesses.len(),
+            "starting Dreamseq pipeline"
+        );
 
         // Step 0: Check kaptaind status if enabled
         if let Some(monitor) = &self.kaptaind_monitor
             && let Ok(status) = monitor.status()
         {
-            tracing::info!("Kaptaind status: {}", status);
+            tracing::info!(status = %status.trim(), "Kaptaind status checked");
         }
 
         // Step 1: Aggregate logs from all harnesses
@@ -118,7 +121,7 @@ impl Dreamseq {
             .map(|entry| entry.content.split_whitespace().count())
             .sum();
         let segments = self.segmenter.segment(normalized_logs)?;
-        tracing::info!("Created {} segments", segments.len());
+        tracing::info!(segments = segments.len(), "created semantic segments");
 
         // Step 4: Analyze with Groq
         if !segments.is_empty() && !self.config.allow_remote_analysis {
@@ -127,15 +130,21 @@ impl Dreamseq {
             );
         }
         let analysis = self.groq_client.analyze(&segments).await?;
-        tracing::info!("Completed Groq analysis");
+        tracing::info!(
+            segments = segments.len(),
+            "completed routed inference analysis"
+        );
 
         // Step 5: Extract patterns
         let patterns = self.pattern_extractor.extract(&analysis)?;
-        tracing::info!("Extracted {} patterns", patterns.len());
+        tracing::info!(patterns = patterns.len(), "extracted engineering patterns");
 
         // Step 6: Detect user steering
         let steering_events = self.steering_detector.detect(&segments)?;
-        tracing::info!("Detected {} steering events", steering_events.len());
+        tracing::info!(
+            steering_events = steering_events.len(),
+            "detected steering events"
+        );
 
         // Step 7: Generate anthology
         let mut anthology = Anthology::new(patterns, steering_events, self.config.clone());
@@ -150,7 +159,7 @@ impl Dreamseq {
         match self.trend_analyzer.analyze(&anthology).await {
             Ok(trends) => {
                 anthology.add_trends(trends);
-                tracing::info!("added trend analysis");
+                tracing::info!(anthology_id = %anthology.id, "added trend analysis");
             }
             Err(error) => tracing::warn!(error = %error, "trend analysis was unavailable"),
         }

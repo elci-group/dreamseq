@@ -19,7 +19,7 @@ impl KaptaindMonitor {
             .status()?;
 
         if status.success() {
-            tracing::info!("Kaptaind initialized for Dreamseq project");
+            tracing::info!(project = %self.project_path.display(), "Kaptaind initialized for Dreamseq project");
             Ok(())
         } else {
             anyhow::bail!("Failed to initialize kaptaind");
@@ -64,7 +64,7 @@ impl KaptaindMonitor {
             .status()?;
 
         if status.success() {
-            tracing::info!("Kaptaind daemon started");
+            tracing::info!(project = %self.project_path.display(), "Kaptaind daemon started");
             Ok(())
         } else {
             anyhow::bail!("Failed to start kaptaind daemon");
@@ -116,7 +116,7 @@ provider = "auto"
         let config_path = self.project_path.join("kaptaind.toml");
         std::fs::write(&config_path, config_content)?;
 
-        tracing::info!("Kaptaind configuration created at {:?}", config_path);
+        tracing::info!(path = %config_path.display(), "Kaptaind configuration created");
         Ok(())
     }
 
@@ -142,7 +142,7 @@ Thumbs.db
         let ignore_path = self.project_path.join(".kaptainignore");
         std::fs::write(&ignore_path, ignore_content)?;
 
-        tracing::info!("Kaptaind ignore file created at {:?}", ignore_path);
+        tracing::info!(path = %ignore_path.display(), "Kaptaind ignore file created");
         Ok(())
     }
 }

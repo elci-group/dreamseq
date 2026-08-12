@@ -441,6 +441,7 @@ fn parse_json_timestamp(value: &serde_json::Value) -> Option<DateTime<Utc>> {
             .inspect_err(|error| {
                 tracing::warn!(timestamp = text, error = %error, "invalid JSON timestamp");
             })
+            // traci: allow -- inspect_err above records the rejected value and parser failure.
             .ok();
     }
     if let Some(seconds) = value.as_i64() {

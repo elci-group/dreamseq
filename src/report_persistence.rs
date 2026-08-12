@@ -22,6 +22,7 @@ pub(crate) fn save_dreams(anthology: &Anthology, repository: &Path) -> Result<Pa
         if !path.exists() {
             match crate::fs_security::create_private(&path, b"version: 1\ndreams: []\n") {
                 Ok(()) => {}
+                // traci: allow -- AlreadyExists is expected and recorded in the guarded branch.
                 Err(error)
                     if error
                         .downcast_ref::<std::io::Error>()

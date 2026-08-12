@@ -826,6 +826,7 @@ fn parse_numeric_string(value: &str) -> Option<f64> {
     let leading_digits = normalized
         .split(|character: char| !character.is_ascii_digit() && character != '.')
         .find(|part| !part.is_empty())
+        // traci: allow -- invalid fragments are expected while extracting a number from prose.
         .and_then(|part| part.parse::<f64>().ok());
     if leading_digits.is_some() {
         return leading_digits;

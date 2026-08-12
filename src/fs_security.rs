@@ -33,6 +33,7 @@ pub(crate) fn write_private_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     })();
 
     if result.is_err() {
+        // traci: allow -- cleanup failures are explicitly logged with path and error.
         if let Err(error) = fs::remove_file(&temporary)
             && error.kind() != std::io::ErrorKind::NotFound
         {

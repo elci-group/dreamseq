@@ -31,9 +31,10 @@ impl Normalizer {
         }
 
         tracing::info!(
-            "Normalized {} entries: retained repeated evidence and removed {} empty entries",
-            original_len,
-            empty
+            input_entries = original_len,
+            empty_entries = empty,
+            output_entries = normalized.len(),
+            "normalized entries while retaining repeated evidence"
         );
         Ok(normalized)
     }

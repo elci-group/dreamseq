@@ -423,8 +423,8 @@ fn parse_hours(value: &str) -> f64 {
     value
         .split(|character: char| !(character.is_ascii_digit() || character == '.'))
         .find_map(|part| {
-            // traci: allow -- non-numeric fragments are expected while scanning prose.
             (!part.is_empty())
+                // traci: allow -- non-numeric fragments are expected while scanning prose.
                 .then(|| part.parse::<f64>().ok())
                 .flatten()
         })

@@ -429,7 +429,7 @@ impl Anthology {
             return Vec::new();
         };
         let Ok(document) = content.parse::<toml::Value>() else {
-            tracing::warn!("could not parse ~/.speckrc while matching existing capabilities");
+            tracing::warn!(path = %home.join(".speckrc").display(), "could not parse capability registry");
             return Vec::new();
         };
         let Some(tools) = document.get("tools").and_then(toml::Value::as_table) else {
