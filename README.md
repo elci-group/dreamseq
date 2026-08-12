@@ -136,7 +136,7 @@ For self-hosted development, pass `--api-url https://your-host` to `login`. Plai
 
 ### Inference routing and BYOK fallback
 
-When a device is paired, Dreamseq sends each already-redacted analysis batch to `dreamsequence.pro` first. Retryable cloud failures, unavailable service configuration, and invalid model output fall through to local BYOK routes in order. Set `DREAMSEQ_DISABLE_CLOUD_INFERENCE=1` to use BYOK exclusively.
+When a device is paired, Dreamseq sends each already-redacted analysis batch to the Dreamsequence production API first. Existing credentials for the legacy `dreamsequence.pro` origin are migrated in memory to the current TLS endpoint, so users do not need to re-pair. Retryable cloud failures, unavailable service configuration, and invalid model output fall through to local BYOK routes in order. Set `DREAMSEQUENCE_API_URL` for an approved self-hosted endpoint or `DREAMSEQ_DISABLE_CLOUD_INFERENCE=1` to use BYOK exclusively.
 
 The legacy `GROQ_API_KEY` remains an automatic final route. Any OpenAI-compatible providers can be configured without writing their keys into Dreamseq files:
 

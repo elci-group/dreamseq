@@ -263,7 +263,10 @@ impl GroqClient {
         for attempt in 1..=MAX_ATTEMPTS {
             let response = self
                 .client
-                .post(format!("{}/api/v1/inference", credentials.api_url))
+                .post(format!(
+                    "{}/api/v1/inference",
+                    crate::cloud::effective_api_url(&credentials.api_url).trim_end_matches('/')
+                ))
                 .bearer_auth(&credentials.access_token)
                 .json(request)
                 .send()

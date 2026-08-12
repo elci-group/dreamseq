@@ -10,7 +10,8 @@ use std::process::Command;
 use std::time::Duration;
 use walkdir::WalkDir;
 
-const DEFAULT_API_URL: &str = "https://dreamsequence.pro";
+const LEGACY_API_URL: &str = "https://dreamsequence.pro";
+const DEFAULT_API_URL: &str = "https://padagonia.dreamsequence.pro/dreamsequence";
 const SCHEMA_VERSION: u8 = 1;
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -238,6 +239,7 @@ impl CloudClient {
     pub fn new(api_url: Option<&str>) -> Result<Self> {
         let base_url = normalize_api_url(
             api_url
+                .map(effective_api_url)
                 .map(str::to_owned)
                 // traci: allow -- an absent optional environment override is expected control flow.
                 .or_else(|| std::env::var("DREAMSEQUENCE_API_URL").ok())
@@ -419,6 +421,14 @@ fn normalize_api_url(value: String) -> Result<String> {
     Ok(value)
 }
 
+pub(crate) fn effective_api_url(value: &str) -> &str {
+    if value.trim_end_matches('/') == LEGACY_API_URL {
+        DEFAULT_API_URL
+    } else {
+        value
+    }
+}
+
 fn parse_hours(value: &str) -> f64 {
     value
         .split(|character: char| !(character.is_ascii_digit() || character == '.'))
@@ -522,6 +532,14 @@ mod tests {
         assert!(CloudClient::new(Some("http://example.com")).is_err());
         assert!(CloudClient::new(Some("http://127.0.0.1:8787")).is_ok());
         assert!(CloudClient::new(Some("https://example.com/")).is_ok());
+    }
+
+    #[test]
+    fn migrates_legacy_commercial_origin_without_repairing() {
+        assert_eq!(effective_api_url("https://dreamsequence.pro"), DEFAULT_API_URL);
+        assert_eq!(effective_api_url("https://dreamsequence.pro/"), DEFAULT_API_URL);
+        assert_eq!(effective_api_url("https://self-hosted.example"), "https://self-hosted.example");
+        assert_eq!(CloudClient::new(Some(LEGACY_API_URL)).unwrap().base_url, DEFAULT_API_URL);
     }
 
     #[test]
