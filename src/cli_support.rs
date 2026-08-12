@@ -151,8 +151,12 @@ pub(crate) fn notify_completion(anthology: &Anthology) {
         .output()
     {
         Ok(output) if output.status.success() => {}
-        Ok(output) => tracing::warn!(status = %output.status, error = %String::from_utf8_lossy(&output.stderr), "TTS notification failed"),
-        Err(error) => tracing::warn!(error = %error, "voxd-cli is unavailable; TTS notification skipped"),
+        Ok(output) => {
+            tracing::warn!(status = %output.status, error = %String::from_utf8_lossy(&output.stderr), "TTS notification failed")
+        }
+        Err(error) => {
+            tracing::warn!(error = %error, "voxd-cli is unavailable; TTS notification skipped")
+        }
     }
 }
 
@@ -183,11 +187,7 @@ pub(crate) fn print_trends(trends: &TrendAnalysis) {
     }
 }
 
-pub(crate) fn render_report(
-    report: &CompletionReport,
-    json: bool,
-    verbose: bool,
-) -> Result<()> {
+pub(crate) fn render_report(report: &CompletionReport, json: bool, verbose: bool) -> Result<()> {
     if json {
         println!("{}", JsonRenderer::render(report)?);
     } else {
