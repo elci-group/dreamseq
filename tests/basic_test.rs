@@ -511,6 +511,18 @@ fn analysis_parser_accepts_numeric_segment_evidence() {
 }
 
 #[test]
+fn analysis_parser_repairs_provider_string_items() {
+    let client = GroqClient::new("test").unwrap();
+    let text = r#"{"model_failures":["authentication retries"],"harness_friction":["slow shell startup"],"missing_tooling":["release evidence"],"workflow_bottlenecks":["manual deploy checks"],"repeated_commands":["git status"],"repeated_prompts":["show me the failing test"],"context_loss":["handoff loses repository state"],"automation_opportunities":["generate a release helper"]}"#;
+    let parsed = client.parse_analysis_for_test(text).unwrap();
+    assert_eq!(parsed.model_failures[0].issue, "authentication retries");
+    assert_eq!(parsed.harness_friction[0].issue, "slow shell startup");
+    assert_eq!(parsed.missing_tooling[0].purpose, "release evidence");
+    assert_eq!(parsed.repeated_commands[0].command, "git status");
+    assert_eq!(parsed.automation_opportunities[0].description, "generate a release helper");
+}
+
+#[test]
 fn groq_prompt_includes_segments_and_schema() {
     let client = GroqClient::new("test").unwrap();
     let prompt = client.build_analysis_prompt_for_test(&[segment_with_content("debug the build")]);
