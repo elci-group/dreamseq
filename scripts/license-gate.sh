@@ -17,3 +17,4 @@ done < <(find src tests -type f -name '*.rs' -print | sort)
 test "$missing" -eq 0
 
 cargo deny check licenses sources
+bash scripts/amber-license-gate.sh
