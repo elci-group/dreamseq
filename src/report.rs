@@ -1,6 +1,5 @@
 use crate::config::DreamseqConfig;
 use crate::patterns::Pattern;
-pub use crate::report_types::*;
 use crate::steering::SteeringEvent;
 use crate::trends::TrendAnalysis;
 use anyhow::Result;
@@ -10,6 +9,128 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Anthology {
+    pub id: String,
+    pub generated_at: DateTime<Utc>,
+    pub date: String,
+    pub executive_summary: String,
+    pub significant_milestones: Vec<String>,
+    pub user_behaviour: UserBehaviour,
+    pub model_weaknesses: Vec<ModelWeakness>,
+    pub harness_weaknesses: Vec<HarnessWeakness>,
+    pub candidate_tools: Vec<CandidateTool>,
+    pub steering_events: Vec<SteeringEvent>,
+    pub patterns: Vec<Pattern>,
+    pub trends: Option<TrendAnalysis>,
+    pub config: DreamseqConfig,
+    #[serde(default)]
+    pub pipeline: PipelineStats,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PipelineStats {
+    pub raw_entries: usize,
+    pub normalized_entries: usize,
+    pub segments: usize,
+    pub estimated_input_tokens: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserBehaviour {
+    pub repeated_git_workflows: Vec<String>,
+    pub repeated_package_installs: Vec<String>,
+    pub repeated_file_navigation: Vec<String>,
+    pub other_patterns: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelWeakness {
+    pub model: String,
+    pub weakness: String,
+    pub frequency: usize,
+    pub examples: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HarnessWeakness {
+    pub harness: String,
+    pub weakness: String,
+    pub severity: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CandidateTool {
+    pub id: String,
+    pub name: String,
+    pub priority: Priority,
+    #[serde(default)]
+    pub category: InterventionCategory,
+    pub reason: String,
+    pub estimated_time_saved: String,
+    pub confidence: f64,
+    pub affected_projects: Vec<String>,
+    #[serde(default)]
+    pub existing_matches: Vec<String>,
+    #[serde(default)]
+    pub mutation_fitness: f64,
+    #[serde(default)]
+    pub capability_overlap: f64,
+    #[serde(default)]
+    pub implementation_cost: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Priority {
+    High,
+    Medium,
+    Low,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum InterventionCategory {
+    MissingCapability,
+    WorkflowAcceleration,
+    PackageManagerFriction,
+    ModelReliability,
+    ContextManagement,
+    #[default]
+    Other,
+}
+
+impl std::fmt::Display for InterventionCategory {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let label = match self {
+            Self::MissingCapability => "Missing capability",
+            Self::WorkflowAcceleration => "Workflow acceleration",
+            Self::PackageManagerFriction => "Package-manager friction",
+            Self::ModelReliability => "Model reliability",
+            Self::ContextManagement => "Context management",
+            Self::Other => "Other friction",
+        };
+        f.write_str(label)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Directive {
+    pub id: String,
+    pub title: String,
+    pub frequency: usize,
+    pub estimated_time_saved: String,
+    pub confidence: f64,
+    pub automation_score: f64,
+    pub implementation_effort: ImplementationEffort,
+    pub affected_projects: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ImplementationEffort {
+    Low,
+    Medium,
+    High,
+}
 
 impl Anthology {
     pub fn new(
