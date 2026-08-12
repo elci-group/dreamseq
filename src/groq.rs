@@ -399,7 +399,7 @@ impl GroqClient {
 
     fn prompt_preamble() -> String {
         String::from(
-            "Analyze these AI agent log segments and identify patterns. Return a JSON response with this structure:\n\
+            "Analyze these AI agent log segments and identify patterns. Return ONLY one valid JSON object. Every array item MUST be an object with exactly the fields shown; never return a string, number, markdown fence, or prose as an array item. Use empty arrays when there are no findings. Return a JSON response with this structure:\n\
             {\n\
               \"model_failures\": [{\"model\": \"\", \"issue\": \"\", \"frequency\": 0, \"example\": \"\"}],\n\
               \"harness_friction\": [{\"harness\": \"\", \"issue\": \"\", \"severity\": 0.0}],\n\
@@ -486,6 +486,7 @@ impl GroqClient {
                 )
             })?,
         };
+        normalize_analysis_items(&mut value);
         coerce_analysis_scalars(&mut value);
         let analysis: Analysis = serde_json::from_value(value)?;
         Ok(analysis)
@@ -507,6 +508,42 @@ impl GroqClient {
     #[doc(hidden)]
     pub fn build_analysis_prompts_for_test(&self, segments: &[Segment]) -> Vec<String> {
         self.build_analysis_prompts(segments)
+    }
+}
+
+/// Keep a provider's useful text findings when it emits a shorthand array of
+/// strings instead of the public typed object schema. This is deliberately
+/// deterministic: it never invents evidence, and uses conservative defaults
+/// for metrics that were not supplied by the provider.
+fn normalize_analysis_items(value: &mut serde_json::Value) {
+    let Some(object) = value.as_object_mut() else { return };
+    let schemas: &[(&str, &[(&str, serde_json::Value)])] = &[
+        ("model_failures", &[("model", serde_json::json!("unknown")), ("issue", serde_json::json!("")), ("frequency", serde_json::json!(1)), ("example", serde_json::json!(""))]),
+        ("harness_friction", &[("harness", serde_json::json!("unknown")), ("issue", serde_json::json!("")), ("severity", serde_json::json!(0.5))]),
+        ("missing_tooling", &[("tool_name", serde_json::json!("candidate-capability")), ("purpose", serde_json::json!("")), ("estimated_value", serde_json::json!(0.5))]),
+        ("workflow_bottlenecks", &[("description", serde_json::json!("")), ("frequency", serde_json::json!(1)), ("time_impact_minutes", serde_json::json!(0.0))]),
+        ("repeated_commands", &[("command", serde_json::json!("")), ("frequency", serde_json::json!(1)), ("context", serde_json::json!(""))]),
+        ("repeated_prompts", &[("prompt_pattern", serde_json::json!("")), ("frequency", serde_json::json!(1)), ("suggested_improvement", serde_json::json!(""))]),
+        ("context_loss", &[("description", serde_json::json!("")), ("affected_segments", serde_json::json!([]))]),
+        ("automation_opportunities", &[("description", serde_json::json!("")), ("estimated_time_saved", serde_json::json!(0.0)), ("confidence", serde_json::json!(0.5))]),
+    ];
+    for (key, fields) in schemas {
+        let Some(items) = object.get_mut(*key).and_then(serde_json::Value::as_array_mut) else { continue };
+        for item in items.iter_mut() {
+            let Some(text) = item.as_str().map(str::trim).filter(|text| !text.is_empty()) else { continue };
+            let mut normalized = serde_json::Map::new();
+            for (field, default) in *fields { normalized.insert((*field).to_string(), default.clone()); }
+            let primary = match *key {
+                "model_failures" | "harness_friction" => "issue",
+                "missing_tooling" => "purpose",
+                "workflow_bottlenecks" | "context_loss" | "automation_opportunities" => "description",
+                "repeated_commands" => "command",
+                "repeated_prompts" => "prompt_pattern",
+                _ => "description",
+            };
+            normalized.insert(primary.to_string(), serde_json::Value::String(text.to_string()));
+            *item = serde_json::Value::Object(normalized);
+        }
     }
 }
 
