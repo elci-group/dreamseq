@@ -149,8 +149,7 @@ impl DreamseqConfig {
             std::fs::create_dir_all(config_dir)?;
         }
         let content = serde_json::to_string_pretty(self)?;
-        std::fs::write(config_path, content)?;
-        set_private_permissions(config_path)?;
+        crate::fs_security::write_private_atomic(config_path, content.as_bytes())?;
         Ok(())
     }
 }
@@ -169,19 +168,4 @@ impl Default for DreamseqConfig {
             groq_base_url: None,
         }
     }
-}
-
-#[cfg(unix)]
-fn set_private_permissions(path: &std::path::Path) -> Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-
-    let mut permissions = std::fs::metadata(path)?.permissions();
-    permissions.set_mode(0o600);
-    std::fs::set_permissions(path, permissions)?;
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn set_private_permissions(_path: &std::path::Path) -> Result<()> {
-    Ok(())
 }

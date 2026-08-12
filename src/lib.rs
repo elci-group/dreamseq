@@ -4,6 +4,7 @@ pub mod bound;
 pub mod cloud;
 pub mod color;
 pub mod config;
+pub(crate) mod fs_security;
 pub mod groq;
 pub mod kaptaind;
 pub mod normalization;

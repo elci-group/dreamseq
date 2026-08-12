@@ -498,8 +498,7 @@ impl Anthology {
         let filepath = self.config.anthologies_dir.join(filename);
 
         let content = serde_json::to_string_pretty(self)?;
-        write_private(&filepath, content.as_bytes())?;
-        set_private_permissions(&filepath)?;
+        crate::fs_security::write_private_atomic(&filepath, content.as_bytes())?;
 
         tracing::info!("Saved anthology to {:?}", filepath);
         Ok(filepath)
@@ -513,7 +512,16 @@ impl Anthology {
         for lifecycle in ["completed.dreams", "rejected.dreams"] {
             let lifecycle_path = dreams_dir.join(lifecycle);
             if !lifecycle_path.exists() {
-                fs::write(&lifecycle_path, "version: 1\ndreams: []\n")?;
+                match crate::fs_security::create_private(
+                    &lifecycle_path,
+                    b"version: 1\ndreams: []\n",
+                ) {
+                    Ok(()) => {}
+                    Err(error) if error.downcast_ref::<std::io::Error>().is_some_and(|error| {
+                        error.kind() == std::io::ErrorKind::AlreadyExists
+                    }) => {}
+                    Err(error) => return Err(error),
+                }
             }
         }
         let path = dreams_dir.join("active.dreams");
@@ -561,12 +569,12 @@ impl Anthology {
                 action, yaml_scalar(&tool.name), yaml_scalar(&tool.estimated_time_saved)
             ));
         }
-        fs::write(&path, &output)?;
-        fs::write(
-            dreams_dir
+        crate::fs_security::write_private_atomic(&path, output.as_bytes())?;
+        crate::fs_security::write_private_atomic(
+            &dreams_dir
                 .join("history")
                 .join(format!("{}-{}.dreams", self.date, self.id)),
-            &output,
+            output.as_bytes(),
         )?;
         Ok(path)
     }
@@ -679,39 +687,4 @@ fn truncate_rationale(value: &str, max_len: usize) -> String {
     } else {
         format!("{}…", &value[..max_len.saturating_sub(1)])
     }
-}
-
-#[cfg(unix)]
-fn write_private(path: &std::path::Path, bytes: &[u8]) -> Result<()> {
-    use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .write(true)
-        .mode(0o600)
-        .open(path)?;
-    file.write_all(bytes)?;
-    file.sync_all()?;
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn write_private(path: &std::path::Path, bytes: &[u8]) -> Result<()> {
-    std::fs::write(path, bytes)?;
-    Ok(())
-}
-
-#[cfg(unix)]
-fn set_private_permissions(path: &std::path::Path) -> Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    let mut permissions = std::fs::metadata(path)?.permissions();
-    permissions.set_mode(0o600);
-    std::fs::set_permissions(path, permissions)?;
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn set_private_permissions(_path: &std::path::Path) -> Result<()> {
-    Ok(())
 }

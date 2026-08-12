@@ -70,10 +70,10 @@ impl CredentialStore {
             .parent()
             .ok_or_else(|| anyhow::anyhow!("credentials path has no parent"))?;
         fs::create_dir_all(parent)?;
-        let temporary = self.path.with_extension("json.tmp");
-        write_private(&temporary, &serde_json::to_vec_pretty(credentials)?)?;
-        fs::rename(&temporary, &self.path)?;
-        set_private_permissions(&self.path)?;
+        crate::fs_security::write_private_atomic(
+            &self.path,
+            &serde_json::to_vec_pretty(credentials)?,
+        )?;
         Ok(())
     }
 
@@ -425,41 +425,6 @@ fn open_browser(url: &str) -> bool {
             .spawn()
             .is_ok()
     })
-}
-
-#[cfg(unix)]
-fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
-    use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
-    let mut file = fs::OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .write(true)
-        .mode(0o600)
-        .open(path)?;
-    file.write_all(bytes)?;
-    file.sync_all()?;
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn write_private(path: &Path, bytes: &[u8]) -> Result<()> {
-    fs::write(path, bytes)?;
-    Ok(())
-}
-
-#[cfg(unix)]
-fn set_private_permissions(path: &Path) -> Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    let mut permissions = fs::metadata(path)?.permissions();
-    permissions.set_mode(0o600);
-    fs::set_permissions(path, permissions)?;
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn set_private_permissions(_path: &Path) -> Result<()> {
-    Ok(())
 }
 
 #[cfg(test)]
