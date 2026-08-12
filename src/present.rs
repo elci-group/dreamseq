@@ -1,6 +1,6 @@
+use crate::color::Colorize;
 use crate::report::{Anthology, CandidateTool, InterventionCategory, Priority};
 use anyhow::Result;
-use colored::Colorize;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 

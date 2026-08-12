@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use colored::Colorize;
 use dreamseq::cloud::{CloudClient, CredentialStore};
+use dreamseq::color::Colorize;
 use dreamseq::present::{CompletionReport, HumanRenderer, JsonRenderer};
 use dreamseq::{Anthology, Dreamseq, DreamseqConfig, TrendAnalysis};
 use tracing_subscriber::EnvFilter;

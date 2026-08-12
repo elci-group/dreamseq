@@ -1,6 +1,6 @@
 [package]
 name = "dreamseq"
-version = "0.4.0"
+version = "1.0.0"
 edition = "2024"
 
 [dependencies]
@@ -19,4 +19,3 @@ walkdir = "2.0"
 regex = "1.0"
 uuid = { version = "1.0", features = ["v4", "serde"] }
 dirs = "5.0"
-colored = "2.1"

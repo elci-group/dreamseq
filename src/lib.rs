@@ -1,6 +1,7 @@
 pub mod aggregator;
 pub mod bound;
 pub mod cloud;
+pub mod color;
 pub mod config;
 pub mod groq;
 pub mod kaptaind;
