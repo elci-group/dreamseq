@@ -59,6 +59,9 @@ mod tests {
     #[test]
     fn rejects_missing_run() {
         let value = serde_json::json!({"schema_version": 1});
-        assert!(matches!(validate_run_envelope(&value, 0.9), GatewayDecision::Reject(_)));
+        assert!(matches!(
+            validate_run_envelope(&value, 0.9),
+            GatewayDecision::Reject(_)
+        ));
     }
 }
