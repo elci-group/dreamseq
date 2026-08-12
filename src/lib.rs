@@ -12,6 +12,7 @@ pub mod patterns;
 pub mod present;
 pub mod report;
 mod report_persistence;
+mod report_types;
 pub mod segmentation;
 pub mod steering;
 pub mod trends;
