@@ -1,4 +1,5 @@
 use crate::report::{Anthology, CandidateTool, Priority};
+use crate::goblin_gateway::{GatewayDecision, validate_run_envelope};
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use reqwest::{Client, StatusCode};
@@ -298,14 +299,20 @@ impl CloudClient {
     }
 
     pub async fn upload(&self, credentials: &Credentials, anthology: &Anthology) -> Result<()> {
+        let envelope = RunEnvelope::from_anthology(anthology, &credentials.device_id);
+        let envelope_value = serde_json::to_value(&envelope)?;
+        let decision = validate_run_envelope(&envelope_value, 0.90);
+        tracing::info!(decision = %decision, "Goblin run-envelope preflight completed");
+        if std::env::var("DREAMSEQ_GOBLIN_ENFORCE").as_deref() == Ok("1")
+            && !matches!(decision, GatewayDecision::Accept)
+        {
+            anyhow::bail!("Goblin rejected the run envelope: {decision}");
+        }
         let response = self
             .http
             .post(format!("{}/api/v1/runs", self.base_url))
             .bearer_auth(&credentials.access_token)
-            .json(&RunEnvelope::from_anthology(
-                anthology,
-                &credentials.device_id,
-            ))
+            .json(&envelope)
             .send()
             .await?;
         let _: serde_json::Value = parse_response(response).await?;
