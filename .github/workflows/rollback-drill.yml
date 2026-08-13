@@ -1,0 +1,39 @@
+name: Published rollback drill
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 5 * * 1'
+
+permissions:
+  contents: read
+  attestations: read
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Verify published upgrade and rollback
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/rollback-drill.sh | tee dreamseq-rollback-receipt.json
+      - name: Validate receipt contract
+        run: >-
+          jq -e '
+          .ok == true and
+          .sequence == ["v1.3.16", "v1.3.17", "v1.3.16", "v1.3.17"] and
+          .final_version == "dreamseq 1.3.17" and
+          .state_preserved == true and
+          .checksums_verified == true and
+          .provenance_verified == true
+          ' dreamseq-rollback-receipt.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: dreamseq-rollback-receipt
+          path: dreamseq-rollback-receipt.json
+          if-no-files-found: error
+          retention-days: 90
