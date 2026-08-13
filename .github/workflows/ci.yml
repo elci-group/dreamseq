@@ -33,7 +33,9 @@ jobs:
         run: cargo test --all-targets --all-features
 
       - name: Verify deterministic release tooling
-        run: python3 scripts/test_release_artifacts.py
+        run: |
+          python3 scripts/test_release_artifacts.py
+          python3 scripts/test_extract_amber_json.py
 
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
