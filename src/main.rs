@@ -13,6 +13,7 @@ use cli_support::*;
 
 #[derive(Parser)]
 #[command(name = "dreamseq")]
+#[command(version)]
 #[command(about = "🌙 End-of-day agent reflection protocol", long_about = None)]
 struct Cli {
     #[command(subcommand)]

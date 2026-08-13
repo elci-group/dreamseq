@@ -5,6 +5,19 @@ use std::fs;
 use std::process::Command;
 
 #[test]
+fn version_is_exposed_for_support_diagnostics() {
+    let output = Command::new(env!("CARGO_BIN_EXE_dreamseq"))
+        .arg("--version")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        concat!("dreamseq ", env!("CARGO_PKG_VERSION"))
+    );
+}
+
+#[test]
 fn auth_and_sync_commands_are_exposed() {
     let output = Command::new(env!("CARGO_BIN_EXE_dreamseq"))
         .arg("--help")
