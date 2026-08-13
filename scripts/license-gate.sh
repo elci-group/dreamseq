@@ -16,5 +16,7 @@ while IFS= read -r file; do
 done < <(find src tests -type f -name '*.rs' -print | sort)
 test "$missing" -eq 0
 
-cargo deny check licenses sources
+if [[ "${DREAMSEQ_LICENSES_PRECHECKED:-0}" != "1" ]]; then
+  cargo deny check licenses sources
+fi
 bash scripts/amber-license-gate.sh

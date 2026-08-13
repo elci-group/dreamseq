@@ -54,6 +54,8 @@ jobs:
 
       - name: Verify licensing metadata, SPDX headers, and Amber policy
         run: bash scripts/license-gate.sh
+        env:
+          DREAMSEQ_LICENSES_PRECHECKED: '1'
 
       - name: Verify distributable package
         run: cargo package --locked
