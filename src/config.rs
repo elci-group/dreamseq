@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DreamseqConfig {
@@ -86,6 +86,10 @@ impl DreamseqConfig {
 
     fn discovered_harnesses() -> Vec<HarnessConfig> {
         let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+        Self::discovered_harnesses_in(&home)
+    }
+
+    fn discovered_harnesses_in(home: &Path) -> Vec<HarnessConfig> {
         let candidates = [
             ("claude", home.join(".claude/telemetry"), LogFormat::Json),
             ("grok", home.join(".grok/logs"), LogFormat::Json),
@@ -169,5 +173,26 @@ impl Default for DreamseqConfig {
             allow_remote_analysis: false,
             groq_base_url: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DreamseqConfig;
+
+    #[test]
+    fn discovery_finds_only_existing_harness_sources() {
+        let root =
+            std::env::temp_dir().join(format!("dreamseq-discovery-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(root.join(".grok/logs")).unwrap();
+        std::fs::create_dir_all(root.join(".kimi/logs")).unwrap();
+
+        let harnesses = DreamseqConfig::discovered_harnesses_in(&root);
+        assert_eq!(harnesses.len(), 2);
+        assert!(harnesses.iter().any(|harness| harness.name == "grok"));
+        assert!(harnesses.iter().any(|harness| harness.name == "kimi"));
+        assert!(!harnesses.iter().any(|harness| harness.name == "codex"));
+
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

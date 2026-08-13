@@ -171,13 +171,6 @@ fn config_falls_back_to_groq_environment_key() {
 }
 
 #[test]
-fn discovery_finds_existing_harness_sources() {
-    let config = DreamseqConfig::discover();
-    assert!(config.harnesses.iter().any(|h| h.name == "grok"));
-    assert!(config.harnesses.iter().any(|h| h.name == "kimi"));
-}
-
-#[test]
 fn test_pattern_extraction_empty_analysis_yields_empty_patterns() {
     use dreamseq::groq::Analysis;
     use dreamseq::patterns::PatternExtractor;
