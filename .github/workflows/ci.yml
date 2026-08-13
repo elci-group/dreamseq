@@ -47,7 +47,10 @@ jobs:
           command: check licenses sources
 
       - name: Install Amber policy analyzer
-        run: cargo install --git https://github.com/elci-group/amber.git --locked
+        run: >-
+          cargo install --git https://github.com/elci-group/amber.git
+          --rev 2db9f2e94b4f02eda4267d3e5e2f64eca180522b
+          --package amber --locked
 
       - name: Verify licensing metadata, SPDX headers, and Amber policy
         run: bash scripts/license-gate.sh
