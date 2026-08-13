@@ -4,14 +4,15 @@ on:
   push:
     tags: ['v*']
 
-permissions:
-  contents: write
-  id-token: write
-  attestations: write
+permissions: {}
 
 jobs:
   build:
     name: Build ${{ matrix.target }}
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     strategy:
       fail-fast: false
       matrix:
@@ -19,72 +20,89 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             archive: tar.gz
+            binary: dreamseq
           - os: macos-latest
             target: aarch64-apple-darwin
             archive: tar.gz
+            binary: dreamseq
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             archive: zip
+            binary: dreamseq.exe
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         with:
           targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
         with:
           key: ${{ matrix.target }}
       - run: cargo build --release --locked --target ${{ matrix.target }}
-      - name: Package Unix binary
-        if: matrix.archive == 'tar.gz'
+      - name: Package deterministic archive
         shell: bash
-        run: |
-          mkdir -p staging
-          cp target/${{ matrix.target }}/release/dreamseq staging/
-          cp README.md LICENSE staging/
-          tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner -czf dreamseq-${{ github.ref_name }}-${{ matrix.target }}.tar.gz -C staging .
-      - name: Package Windows binary
-        if: matrix.archive == 'zip'
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Path staging
-          Copy-Item target/${{ matrix.target }}/release/dreamseq.exe staging/
-          Copy-Item README.md,LICENSE staging/
-          Compress-Archive -Path staging/* -DestinationPath dreamseq-${{ github.ref_name }}-${{ matrix.target }}.zip
+        run: >-
+          python scripts/release_artifacts.py package
+          --binary target/${{ matrix.target }}/release/${{ matrix.binary }}
+          --format ${{ matrix.archive }}
+          --output dreamseq-${{ github.ref_name }}-${{ matrix.target }}.${{ matrix.archive }}
       - name: Generate SPDX SBOM
-        uses: anchore/sbom-action@v0
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
         with:
           path: target/${{ matrix.target }}/release
           artifact-name: dreamseq-${{ matrix.target }}.spdx.json
           output-file: dreamseq-${{ matrix.target }}.spdx.json
-      - name: Checksum artifacts
+      - name: Create and verify checksum manifest
         shell: bash
-        run: sha256sum dreamseq-${{ github.ref_name }}-${{ matrix.target }}.* dreamseq-${{ matrix.target }}.spdx.json > dreamseq-${{ matrix.target }}.sha256
-      - name: Attest binaries and packages
-        uses: actions/attest-build-provenance@v2
+        run: |
+          python scripts/release_artifacts.py manifest \
+            --output dreamseq-${{ matrix.target }}.sha256 \
+            dreamseq-${{ github.ref_name }}-${{ matrix.target }}.${{ matrix.archive }} \
+            dreamseq-${{ matrix.target }}.spdx.json
+          python scripts/release_artifacts.py verify --manifest dreamseq-${{ matrix.target }}.sha256
+      - name: Attest archive, SBOM, and checksum manifest
+        uses: actions/attest-build-provenance@96b4a1ef7235a096b17240c259729fdd70c83d45 # v2
         with:
           subject-path: |
-            dreamseq-${{ github.ref_name }}-${{ matrix.target }}.*
-      - uses: actions/upload-artifact@v4
+            dreamseq-${{ github.ref_name }}-${{ matrix.target }}.${{ matrix.archive }}
+            dreamseq-${{ matrix.target }}.spdx.json
+            dreamseq-${{ matrix.target }}.sha256
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: dreamseq-${{ matrix.target }}
+          retention-days: 14
+          if-no-files-found: error
           path: |
-            dreamseq-${{ github.ref_name }}-${{ matrix.target }}.*
+            dreamseq-${{ github.ref_name }}-${{ matrix.target }}.${{ matrix.archive }}
             dreamseq-${{ matrix.target }}.spdx.json
             dreamseq-${{ matrix.target }}.sha256
 
   publish:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: artifacts
           merge-multiple: true
       - name: Verify checksums before publication
-        run: for manifest in artifacts/*.sha256; do (cd artifacts && sha256sum -c "$(basename "$manifest")"); done
+        shell: bash
+        run: for manifest in artifacts/*.sha256; do python scripts/release_artifacts.py verify --manifest "$manifest"; done
       - name: Publish immutable GitHub release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           generate_release_notes: true
           fail_on_unmatched_files: true
