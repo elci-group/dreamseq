@@ -24,6 +24,8 @@ fn anthology_with_interventions(tools: Vec<CandidateTool>) -> Anthology {
             confidence: 0.9,
             impact_score: 0.85,
             affected_harnesses: vec![],
+            estimated_minutes_per_day: Some(15.0),
+            manifestation_count: 1,
         },
         dreamseq::patterns::Pattern {
             id: "p2".into(),
@@ -33,6 +35,8 @@ fn anthology_with_interventions(tools: Vec<CandidateTool>) -> Anthology {
             confidence: 0.8,
             impact_score: 0.75,
             affected_harnesses: vec!["gpt-4".into()],
+            estimated_minutes_per_day: None,
+            manifestation_count: 1,
         },
     ];
     anthology.pipeline = PipelineStats {

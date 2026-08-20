@@ -345,16 +345,24 @@ impl Anthology {
                 let name = self.suggest_tool_name(&pattern.description);
                 let existing_matches = self.find_existing_matches(&name);
                 let category = category_from_pattern_type(&pattern.pattern_type, &name);
+                let reason = if pattern.manifestation_count > 1 {
+                    format!(
+                        "{} (seen {} times, consolidated)",
+                        truncate_rationale(&pattern.description, 220),
+                        pattern.manifestation_count
+                    )
+                } else {
+                    truncate_rationale(&pattern.description, 240)
+                };
+                let estimated_time_saved =
+                    impact_estimate_label(pattern.estimated_minutes_per_day, &priority);
                 self.candidate_tools.push(CandidateTool {
                     id: format!("DS-{:04}", tool_id),
                     name: name.clone(),
                     priority,
                     category,
-                    reason: truncate_rationale(&pattern.description, 240),
-                    estimated_time_saved: format!(
-                        "{} min/day",
-                        (pattern.impact_score * 20.0) as i32
-                    ),
+                    reason,
+                    estimated_time_saved,
                     confidence: pattern.confidence,
                     affected_projects: pattern.affected_harnesses.clone(),
                     existing_matches: existing_matches.clone(),
@@ -401,24 +409,26 @@ impl Anthology {
                 + (events.len() as f64 / 100.0).min(1.0) * 0.25
                 + overlap * 0.2)
                 .min(1.0);
+            let priority = if events.len() >= 10 {
+                Priority::High
+            } else {
+                Priority::Medium
+            };
             self.candidate_tools.push(CandidateTool {
                 id: format!("DS-{:04}", self.candidate_tools.len() + 1),
                 name: name.to_string(),
-                priority: if events.len() >= 10 {
-                    Priority::High
-                } else {
-                    Priority::Medium
-                },
+                priority: priority.clone(),
                 category: category_from_steering_category(&category, name),
                 reason: format!(
                     "{} steering events clustered as {:?}",
                     events.len(),
                     category
                 ),
-                estimated_time_saved: format!(
-                    "{} min/day",
-                    (average_severity * events.len() as f64 * 2.0) as i32
-                ),
+                // Steering events carry a severity score, not a time-cost
+                // estimate — there's no evidence basis for minutes here, so
+                // this is a qualitative label rather than a fabricated
+                // number (see `impact_estimate_label`).
+                estimated_time_saved: impact_estimate_label(None, &priority),
                 confidence: (average_severity + (events.len() as f64 / 20.0).min(1.0)) / 2.0,
                 affected_projects: Vec::new(),
                 existing_matches,
@@ -594,6 +604,32 @@ fn category_from_steering_category(
         | crate::steering::SteeringCategory::ExcessVerbosity
         | crate::steering::SteeringCategory::ArchitecturalMismatch
         | crate::steering::SteeringCategory::Other => InterventionCategory::Other,
+    }
+}
+
+/// Renders a candidate tool's time-impact field honestly instead of
+/// presenting every finding with the same false numeric precision. Only
+/// `WorkflowBottleneck` and `AutomationOpportunity` patterns ever carry a
+/// genuine LLM-estimated `time_impact_minutes`/`estimated_time_saved` value
+/// — every other source (model failures, harness friction, missing tools,
+/// repeated commands/prompts, context loss, steering-event clusters) has no
+/// time basis at all. Those previously all got the same kind of number
+/// anyway, computed by scaling an already-synthetic 0–1 score by a fixed
+/// constant (e.g. `impact_score * 20`) — which reliably produces
+/// suspiciously round, suspiciously similar "X min/day" figures across
+/// completely unrelated findings, exactly the pattern that made the whole
+/// field look fabricated rather than measured.
+fn impact_estimate_label(minutes_per_day: Option<f64>, priority: &Priority) -> String {
+    match minutes_per_day {
+        Some(minutes) => format!("~{:.0} min/day (evidence-based)", minutes.max(0.0)),
+        None => format!(
+            "Estimated impact: {}",
+            match priority {
+                Priority::High => "High",
+                Priority::Medium => "Medium",
+                Priority::Low => "Low",
+            }
+        ),
     }
 }
 

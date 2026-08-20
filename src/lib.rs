@@ -17,6 +17,7 @@ pub mod report;
 mod report_persistence;
 pub mod segmentation;
 pub mod steering;
+pub(crate) mod text_similarity;
 pub mod trends;
 
 pub use aggregator::LogAggregator;

@@ -1,8 +1,10 @@
 // Copyright (c) 2026 Dreamsequence Ltd
 // SPDX-License-Identifier: MIT
 use crate::groq::Analysis;
+use crate::text_similarity::{jaccard_similarity, meaningful_words};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Pattern {
@@ -13,9 +15,26 @@ pub struct Pattern {
     pub confidence: f64,
     pub impact_score: f64,
     pub affected_harnesses: Vec<String>,
+    /// A genuine per-finding minutes estimate, carried through separately
+    /// from `impact_score` rather than backed into it — only
+    /// `WorkflowBottleneck` and `AutomationOpportunity` findings come with
+    /// one from the model; every other pattern type has no time basis at
+    /// all and must not present one. `None` means "not quantified", not
+    /// zero impact.
+    #[serde(default)]
+    pub estimated_minutes_per_day: Option<f64>,
+    /// How many separately-worded findings across batches were consolidated
+    /// into this one pattern (see `consolidate` below). 1 for a pattern that
+    /// wasn't merged with anything.
+    #[serde(default = "one")]
+    pub manifestation_count: usize,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+fn one() -> usize {
+    1
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum PatternType {
     ModelFailure,
     HarnessFriction,
@@ -26,6 +45,14 @@ pub enum PatternType {
     ContextLoss,
     AutomationOpportunity,
 }
+
+// Jaccard similarity (shared distinct words / all distinct words), not
+// TF-IDF cosine — see text_similarity::jaccard_similarity for why idf
+// weighting works against this specific comparison. Calibrated so that two
+// findings sharing most of their words but differing in one technical
+// detail (e.g. two dotted event names) clear it, while two findings that
+// merely share a couple of generic words ("missing", "handler") don't.
+const PATTERN_SIMILARITY_THRESHOLD: f64 = 0.4;
 
 pub struct PatternExtractor;
 
@@ -53,6 +80,8 @@ impl PatternExtractor {
                 confidence: 0.8,
                 impact_score: self.calculate_impact_score(failure.frequency as f64, 0.7),
                 affected_harnesses: vec![failure.model.clone()],
+                estimated_minutes_per_day: None,
+                manifestation_count: 1,
             });
         }
 
@@ -66,6 +95,8 @@ impl PatternExtractor {
                 confidence: friction.severity,
                 impact_score: friction.severity,
                 affected_harnesses: vec![friction.harness.clone()],
+                estimated_minutes_per_day: None,
+                manifestation_count: 1,
             });
         }
 
@@ -79,6 +110,8 @@ impl PatternExtractor {
                 confidence: 0.9,
                 impact_score: tool.estimated_value,
                 affected_harnesses: vec![],
+                estimated_minutes_per_day: None,
+                manifestation_count: 1,
             });
         }
 
@@ -95,6 +128,8 @@ impl PatternExtractor {
                     bottleneck.time_impact_minutes / 60.0,
                 ),
                 affected_harnesses: vec![],
+                estimated_minutes_per_day: Some(bottleneck.time_impact_minutes),
+                manifestation_count: 1,
             });
         }
 
@@ -108,6 +143,8 @@ impl PatternExtractor {
                 confidence: 0.95,
                 impact_score: self.calculate_impact_score(command.frequency as f64, 0.5),
                 affected_harnesses: vec![command.context.clone()],
+                estimated_minutes_per_day: None,
+                manifestation_count: 1,
             });
         }
 
@@ -121,6 +158,8 @@ impl PatternExtractor {
                 confidence: 0.9,
                 impact_score: self.calculate_impact_score(prompt.frequency as f64, 0.3),
                 affected_harnesses: vec![],
+                estimated_minutes_per_day: None,
+                manifestation_count: 1,
             });
         }
 
@@ -134,6 +173,8 @@ impl PatternExtractor {
                 confidence: 0.75,
                 impact_score: self.calculate_impact_score(loss.affected_segments.len() as f64, 0.8),
                 affected_harnesses: loss.affected_segments.clone(),
+                estimated_minutes_per_day: None,
+                manifestation_count: 1,
             });
         }
 
@@ -148,8 +189,12 @@ impl PatternExtractor {
                 impact_score: self
                     .calculate_impact_score(1.0, opportunity.estimated_time_saved / 60.0),
                 affected_harnesses: vec![],
+                estimated_minutes_per_day: Some(opportunity.estimated_time_saved),
+                manifestation_count: 1,
             });
         }
+
+        let mut patterns = consolidate(patterns);
 
         // Sort by impact score
         patterns.sort_by(|a, b| b.impact_score.total_cmp(&a.impact_score));
@@ -162,5 +207,124 @@ impl PatternExtractor {
         let frequency_score = (frequency.min(100.0) / 100.0) * 0.5;
         let time_score = (time_hours.min(10.0) / 10.0) * 0.5;
         frequency_score + time_score
+    }
+}
+
+/// Collapses patterns that describe the same underlying root cause with
+/// different wording — the LLM analyzes each batch independently, so a
+/// recurring defect (e.g. incomplete Responses-API event coverage) shows up
+/// as many differently-phrased findings across batches rather than one.
+/// `Analysis::merge` already deduplicates exact-string repeats across
+/// batches before this runs; this catches the much larger set of
+/// near-duplicates that merge missed because the wording differs.
+///
+/// Deliberately does not merge across `PatternType` — a `MissingTool` and a
+/// `WorkflowBottleneck` are different kinds of finding even if their prose
+/// overlaps, and merging them would blur a distinction the rest of the
+/// pipeline (candidate-tool categorization, user-behaviour extraction)
+/// still relies on.
+fn consolidate(patterns: Vec<Pattern>) -> Vec<Pattern> {
+    let mut by_type: HashMap<PatternType, Vec<Pattern>> = HashMap::new();
+    for pattern in patterns {
+        by_type.entry(pattern.pattern_type).or_default().push(pattern);
+    }
+
+    let mut consolidated = Vec::new();
+    for (_pattern_type, group) in by_type {
+        consolidated.extend(consolidate_group(group));
+    }
+    consolidated
+}
+
+fn consolidate_group(group: Vec<Pattern>) -> Vec<Pattern> {
+    if group.len() < 2 {
+        return group;
+    }
+
+    let word_sets: Vec<_> = group
+        .iter()
+        .map(|pattern| meaningful_words(&pattern.description))
+        .collect();
+
+    let mut merged_into: Vec<Option<usize>> = vec![None; group.len()];
+    let mut clusters: Vec<Vec<usize>> = Vec::new();
+    for i in 0..group.len() {
+        if merged_into[i].is_some() {
+            continue;
+        }
+        let cluster_index = clusters.len();
+        clusters.push(vec![i]);
+        merged_into[i] = Some(cluster_index);
+        for j in (i + 1)..group.len() {
+            if merged_into[j].is_some() {
+                continue;
+            }
+            if jaccard_similarity(&word_sets[i], &word_sets[j]) >= PATTERN_SIMILARITY_THRESHOLD {
+                clusters[cluster_index].push(j);
+                merged_into[j] = Some(cluster_index);
+            }
+        }
+    }
+
+    clusters
+        .into_iter()
+        .map(|indices| merge_cluster(indices.into_iter().map(|i| group[i].clone()).collect()))
+        .collect()
+}
+
+fn merge_cluster(mut members: Vec<Pattern>) -> Pattern {
+    if members.len() == 1 {
+        return members.remove(0);
+    }
+
+    // The clearest single description to represent the cluster is whichever
+    // member individually scored highest — not a synthesized summary, since
+    // nothing here is re-running the LLM to write one.
+    let representative_index = members
+        .iter()
+        .enumerate()
+        .max_by(|(_, a), (_, b)| a.impact_score.total_cmp(&b.impact_score))
+        .map(|(index, _)| index)
+        .unwrap_or(0);
+
+    let mut affected_harnesses: Vec<String> = members
+        .iter()
+        .flat_map(|pattern| pattern.affected_harnesses.iter().cloned())
+        .collect();
+    affected_harnesses.sort();
+    affected_harnesses.dedup();
+
+    let frequency = members.iter().map(|pattern| pattern.frequency).sum();
+    let manifestation_count = members.iter().map(|pattern| pattern.manifestation_count).sum();
+    // Max, not sum: these findings are different wordings of the *same*
+    // root cause, so their individual time estimates are competing
+    // descriptions of one impact, not additive minutes. Summing would
+    // double-count the same underlying time the way a naive rollup of
+    // "20 min/day" x N near-duplicates would.
+    let estimated_minutes_per_day = members
+        .iter()
+        .filter_map(|pattern| pattern.estimated_minutes_per_day)
+        .fold(None, |max, value| Some(max.map_or(value, |m: f64| m.max(value))));
+    let confidence = members
+        .iter()
+        .map(|pattern| pattern.confidence)
+        .fold(0.0, f64::max);
+    let impact_score = members
+        .iter()
+        .map(|pattern| pattern.impact_score)
+        .fold(0.0, f64::max);
+
+    let representative = members.swap_remove(representative_index);
+
+    Pattern {
+        id: uuid::Uuid::new_v4().to_string(),
+        pattern_type: representative.pattern_type,
+        description: representative.description,
+        frequency,
+        confidence,
+        impact_score,
+        affected_harnesses,
+        estimated_minutes_per_day,
+        manifestation_count,
     }
 }

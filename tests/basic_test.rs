@@ -224,6 +224,168 @@ fn test_pattern_extraction_populates_patterns() {
 }
 
 #[test]
+fn near_duplicate_findings_consolidate_into_one_pattern_with_max_not_summed_minutes() {
+    use dreamseq::groq::{Analysis, MissingTool, WorkflowBottleneck};
+    use dreamseq::patterns::{PatternExtractor, PatternType};
+
+    let extractor = PatternExtractor::new();
+    let analysis = Analysis {
+        model_failures: vec![],
+        harness_friction: vec![],
+        missing_tooling: vec![
+            // Same wording as one of the bottlenecks below, but a different
+            // pattern type — must never merge across types even if the
+            // text is identical.
+            MissingTool {
+                tool_name: "responses-api-handler".to_string(),
+                purpose: "Responses API missing handler for function_call_arguments.delta events"
+                    .to_string(),
+                estimated_value: 0.5,
+            },
+        ],
+        workflow_bottlenecks: vec![
+            WorkflowBottleneck {
+                description: "Responses API missing handler for function_call_arguments.delta events"
+                    .to_string(),
+                frequency: 4,
+                time_impact_minutes: 20.0,
+            },
+            WorkflowBottleneck {
+                description: "Responses API missing handler for in_progress events".to_string(),
+                frequency: 3,
+                time_impact_minutes: 15.0,
+            },
+            WorkflowBottleneck {
+                description: "Responses API missing handler for custom_tool_call_input.done events"
+                    .to_string(),
+                frequency: 2,
+                time_impact_minutes: 18.0,
+            },
+            WorkflowBottleneck {
+                description: "Docker healthcheck exceeds latency threshold repeatedly".to_string(),
+                frequency: 5,
+                time_impact_minutes: 10.0,
+            },
+        ],
+        repeated_commands: vec![],
+        repeated_prompts: vec![],
+        context_loss: vec![],
+        automation_opportunities: vec![],
+    };
+
+    let patterns = extractor.extract(&analysis).unwrap();
+
+    let bottlenecks: Vec<_> = patterns
+        .iter()
+        .filter(|pattern| matches!(pattern.pattern_type, PatternType::WorkflowBottleneck))
+        .collect();
+    // The three Responses-API findings collapse into one; the unrelated
+    // Docker finding stays separate.
+    assert_eq!(
+        bottlenecks.len(),
+        2,
+        "expected the three near-duplicate Responses-API findings to consolidate into one, got: {:#?}",
+        bottlenecks.iter().map(|p| &p.description).collect::<Vec<_>>()
+    );
+
+    let consolidated = bottlenecks
+        .iter()
+        .find(|pattern| pattern.description.contains("Responses API"))
+        .expect("consolidated Responses-API pattern should exist");
+    assert_eq!(
+        consolidated.manifestation_count, 3,
+        "should record how many original findings were merged"
+    );
+    assert_eq!(
+        consolidated.frequency, 9,
+        "frequency should sum across merged manifestations (4 + 3 + 2)"
+    );
+    assert_eq!(
+        consolidated.estimated_minutes_per_day,
+        Some(20.0),
+        "minutes should take the max across merged manifestations, not sum them (avoids double-counting the same root cause's time)"
+    );
+
+    let docker = bottlenecks
+        .iter()
+        .find(|pattern| pattern.description.contains("Docker"))
+        .expect("unrelated Docker pattern should remain separate");
+    assert_eq!(docker.manifestation_count, 1);
+
+    // The MissingTool with identical wording never merged with the
+    // WorkflowBottleneck cluster — types stay isolated.
+    let missing_tool_count = patterns
+        .iter()
+        .filter(|pattern| matches!(pattern.pattern_type, PatternType::MissingTool))
+        .count();
+    assert_eq!(
+        missing_tool_count, 1,
+        "a MissingTool finding must never merge into a WorkflowBottleneck cluster even with identical wording"
+    );
+}
+
+#[test]
+fn candidate_tools_show_real_minutes_only_when_evidence_backed() {
+    use dreamseq::patterns::{Pattern, PatternType};
+    use dreamseq::{Anthology, DreamseqConfig};
+
+    let patterns = vec![
+        Pattern {
+            id: "evidenced".into(),
+            pattern_type: PatternType::WorkflowBottleneck,
+            description: "Slow CI pipeline blocks merges".into(),
+            frequency: 5,
+            confidence: 0.9,
+            impact_score: 0.75,
+            affected_harnesses: vec![],
+            estimated_minutes_per_day: Some(22.0),
+            manifestation_count: 1,
+        },
+        Pattern {
+            id: "unevidenced".into(),
+            pattern_type: PatternType::HarnessFriction,
+            description: "claude-code friction: repeated permission prompts".into(),
+            frequency: 1,
+            confidence: 0.9,
+            impact_score: 0.9,
+            affected_harnesses: vec!["claude-code".into()],
+            estimated_minutes_per_day: None,
+            manifestation_count: 1,
+        },
+    ];
+
+    let mut anthology = Anthology::new(patterns, Vec::new(), DreamseqConfig::default());
+    anthology.generate().unwrap();
+
+    let evidenced = anthology
+        .candidate_tools
+        .iter()
+        .find(|tool| tool.reason.contains("Slow CI"))
+        .expect("evidenced pattern should produce a candidate tool");
+    assert!(
+        evidenced.estimated_time_saved.contains("min/day") && evidenced.estimated_time_saved.contains("evidence-based"),
+        "a pattern with a real minutes estimate should show it labeled as evidence-based, got: {}",
+        evidenced.estimated_time_saved
+    );
+
+    let unevidenced = anthology
+        .candidate_tools
+        .iter()
+        .find(|tool| tool.reason.contains("permission prompts"))
+        .expect("unevidenced pattern should produce a candidate tool");
+    assert!(
+        !unevidenced.estimated_time_saved.contains("min/day"),
+        "a pattern with no real minutes basis must not present a fabricated number, got: {}",
+        unevidenced.estimated_time_saved
+    );
+    assert!(
+        unevidenced.estimated_time_saved.starts_with("Estimated impact:"),
+        "should fall back to a qualitative impact label, got: {}",
+        unevidenced.estimated_time_saved
+    );
+}
+
+#[test]
 fn test_steering_detection() {
     let detector = SteeringDetector::new();
     let events = detector

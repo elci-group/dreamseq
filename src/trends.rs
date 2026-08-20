@@ -384,6 +384,8 @@ mod tests {
             confidence: 0.9,
             impact_score: 0.8,
             affected_harnesses: Vec::new(),
+            estimated_minutes_per_day: None,
+            manifestation_count: 1,
         });
         anthology.save().unwrap();
 
