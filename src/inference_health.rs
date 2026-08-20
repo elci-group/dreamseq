@@ -1,14 +1,15 @@
 // Copyright (c) 2026 Dreamsequence Ltd
 // SPDX-License-Identifier: MIT
-//! Tracks per-route cooldowns, circuit-open state, in-flight concurrency,
-//! and rotation state so inference batches spread load across configured
-//! routes instead of always hammering whichever one sorts first, back off
-//! routes that are actively failing or rate limited instead of retrying
-//! them on every single batch, and stop retrying routes whose failures
-//! cannot self-resolve (a bad API key does not fix itself on a timer).
+//! Tracks per-route cooldowns, circuit-open state, and in-flight
+//! concurrency so inference batches back off routes that are actively
+//! failing or rate limited instead of retrying them on every single batch,
+//! and stop retrying routes whose failures cannot self-resolve (a bad API
+//! key does not fix itself on a timer). Route *selection* itself — which
+//! configured route to prefer for a given batch — is decided deterministically
+//! from the batch's own complexity (see `BatchComplexity` and
+//! `GroqClient::ranked_byok_routes` in groq.rs), not by anything tracked here.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::Semaphore;
@@ -41,7 +42,7 @@ pub(super) struct RouteHealth {
     failure_streaks: Mutex<HashMap<String, u32>>,
     /// Routes whose most recent failure was classified as unrecoverable
     /// (e.g. a rejected API key) rather than transient (e.g. a 429 or a
-    /// dropped connection). Once open, a route is skipped by round-robin
+    /// dropped connection). Once open, a route is skipped by route
     /// selection and the "wait for the soonest recovery" fallback alike —
     /// clearing it requires a fresh `RouteHealth` (a process restart) or an
     /// explicit `record_success`, since nothing about waiting fixes a bad key.
@@ -51,7 +52,6 @@ pub(super) struct RouteHealth {
     /// one's fair share when multiple batches dispatch concurrently.
     route_semaphores: Mutex<HashMap<String, Arc<Semaphore>>>,
     stats: Mutex<HashMap<String, RouteStats>>,
-    cursor: AtomicUsize,
 }
 
 /// Unwrap a mutex guard, recovering its data on a poisoned lock instead of
@@ -81,7 +81,6 @@ impl RouteHealth {
             circuit_open: Mutex::new(HashSet::new()),
             route_semaphores: Mutex::new(HashMap::new()),
             stats: Mutex::new(HashMap::new()),
-            cursor: AtomicUsize::new(0),
         }
     }
 
@@ -171,16 +170,6 @@ impl RouteHealth {
         (until > now).then(|| until - now)
     }
 
-    /// Rotate the starting offset for round-robin route selection so
-    /// consecutive batches spread load across configured routes rather than
-    /// always starting from the first configured one.
-    pub(super) fn next_offset(&self, len: usize) -> usize {
-        if len == 0 {
-            return 0;
-        }
-        self.cursor.fetch_add(1, Ordering::Relaxed) % len
-    }
-
     /// The semaphore bounding concurrent in-flight requests to `name`,
     /// created with `max_concurrency` permits the first time this route is
     /// seen. Callers should hold the returned permit for the duration of
@@ -216,21 +205,6 @@ impl RouteHealth {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn next_offset_rotates_across_routes() {
-        let health = RouteHealth::new();
-        assert_eq!(health.next_offset(3), 0);
-        assert_eq!(health.next_offset(3), 1);
-        assert_eq!(health.next_offset(3), 2);
-        assert_eq!(health.next_offset(3), 0);
-    }
-
-    #[test]
-    fn next_offset_with_zero_routes_is_zero() {
-        let health = RouteHealth::new();
-        assert_eq!(health.next_offset(0), 0);
-    }
 
     #[test]
     fn a_fresh_route_is_not_cooling_down() {

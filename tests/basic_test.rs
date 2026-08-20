@@ -479,68 +479,98 @@ async fn a_rate_limited_route_is_not_hit_again_until_its_cooldown_expires() {
 }
 
 #[tokio::test]
-async fn consecutive_batches_round_robin_across_configured_routes() {
+async fn route_priority_is_ranked_by_batch_complexity_not_rotation() {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
-    async fn always_succeeds_server(listener: TcpListener, hits: Arc<AtomicUsize>, expected: usize) {
-        for _ in 0..expected {
-            let (mut socket, _) = listener.accept().await.unwrap();
-            hits.fetch_add(1, Ordering::SeqCst);
-            let mut buf = vec![0u8; 65536];
-            let _ = socket.read(&mut buf).await;
-            let body = serde_json::json!({
-                "choices": [{"message": {"content": empty_analysis_json().to_string()}}],
-                "usage": {"total_tokens": 15}
-            })
-            .to_string();
-            let _ = socket.write_all(http_response(200, &body).as_bytes()).await;
-        }
+    async fn succeeds_once(listener: TcpListener, hits: Arc<AtomicUsize>) -> String {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        hits.fetch_add(1, Ordering::SeqCst);
+        let mut buf = vec![0u8; 65536];
+        let count = socket.read(&mut buf).await.unwrap();
+        let request = String::from_utf8_lossy(&buf[..count]).into_owned();
+        let body = serde_json::json!({
+            "choices": [{"message": {"content": empty_analysis_json().to_string()}}],
+            "usage": {"total_tokens": 15}
+        })
+        .to_string();
+        let _ = socket.write_all(http_response(200, &body).as_bytes()).await;
+        request
     }
 
-    let route_a = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let route_a_addr = route_a.local_addr().unwrap();
-    let route_b = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let route_b_addr = route_b.local_addr().unwrap();
+    // route-full has no cheaper tier; route-tiered does. Declared in that
+    // order, so a plain rotation or "first configured" rule would try
+    // route-full first for everything.
+    let route_full = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let route_full_addr = route_full.local_addr().unwrap();
+    let route_tiered = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let route_tiered_addr = route_tiered.local_addr().unwrap();
 
-    let hits_a = Arc::new(AtomicUsize::new(0));
-    let hits_b = Arc::new(AtomicUsize::new(0));
-    let server_a = tokio::spawn(always_succeeds_server(route_a, Arc::clone(&hits_a), 2));
-    let server_b = tokio::spawn(always_succeeds_server(route_b, Arc::clone(&hits_b), 2));
+    let hits_full = Arc::new(AtomicUsize::new(0));
+    let hits_tiered = Arc::new(AtomicUsize::new(0));
+    let server_full = tokio::spawn(succeeds_once(route_full, Arc::clone(&hits_full)));
+    let server_tiered = tokio::spawn(succeeds_once(route_tiered, Arc::clone(&hits_tiered)));
 
     let client = GroqClient::new_multi_routed_for_test(
         None,
         &[
-            ("route-a", &format!("http://{route_a_addr}")),
-            ("route-b", &format!("http://{route_b_addr}")),
+            ("route-full", &format!("http://{route_full_addr}"), None),
+            (
+                "route-tiered",
+                &format!("http://{route_tiered_addr}"),
+                Some("cheap-model"),
+            ),
         ],
     )
     .unwrap();
 
-    // Four separate single-batch runs (mirroring four separate `dreamseq
-    // run` invocations, or four sequential batches within one) should
-    // alternate which route is tried first rather than always hammering
-    // whichever route sorts first.
-    for i in 0..4 {
-        client
-            .analyze(&[segment_with_content(&format!("batch {i}"))])
-            .await
-            .unwrap();
-    }
-
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), server_a).await;
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), server_b).await;
+    // A small batch is "light": the route with a cheaper tier available is
+    // a better fit and should be tried first, regardless of declared order.
+    client
+        .analyze(&[segment_with_content("small batch")])
+        .await
+        .unwrap();
+    let tiered_request = tokio::time::timeout(std::time::Duration::from_secs(5), server_tiered)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(
-        hits_a.load(Ordering::SeqCst),
-        2,
-        "load should be split evenly across both configured routes, not concentrated on one"
+        hits_tiered.load(Ordering::SeqCst),
+        1,
+        "a light batch should prefer the route that has a cheaper tier for it"
     );
     assert_eq!(
-        hits_b.load(Ordering::SeqCst),
-        2,
-        "load should be split evenly across both configured routes, not concentrated on one"
+        hits_full.load(Ordering::SeqCst),
+        0,
+        "the route without a cheaper tier shouldn't be touched by a light batch that didn't need it"
+    );
+    assert!(
+        tiered_request.contains("\"model\":\"cheap-model\""),
+        "a light batch should request the route's cheaper light_model, not its full model — got: {tiered_request}"
+    );
+
+    // A large batch is "heavy": there's no tiering distinction to prefer by,
+    // so routes keep their declared order — route-full, tried first. Its
+    // listener from above is still pending (never hit by the light batch),
+    // so this is the same server accepting its first connection.
+    client
+        .analyze(&[segment_with_content(&"x".repeat(30_000))])
+        .await
+        .unwrap();
+    let full_request = tokio::time::timeout(std::time::Duration::from_secs(5), server_full)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        hits_full.load(Ordering::SeqCst),
+        1,
+        "a heavy batch has no tiering preference, so it should try routes in their declared order"
+    );
+    assert!(
+        full_request.contains("\"model\":\"test-model\""),
+        "a heavy batch should request the route's full model — got: {full_request}"
     );
 }
 

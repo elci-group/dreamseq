@@ -45,6 +45,33 @@ const BATCH_CONCURRENCY: usize = 4;
 // the whole global budget, while multiple configured routes still add up
 // to real parallelism across providers.
 const ROUTE_CONCURRENCY: usize = 2;
+// A prompt filling more than this fraction of MAX_PROMPT_CHARS counts as a
+// "heavy" batch. Mirrors the rough split dreamsequence-api's own
+// batch_complexity_tier() makes server-side, chosen the same way: not a
+// precisely tuned threshold, just a deterministic midpoint so the same
+// batch always classifies the same way.
+const HEAVY_COMPLEXITY_THRESHOLD: f64 = 0.5;
+
+/// How much load a batch represents, computed deterministically from the
+/// prompt's own size — the same batch always ranks the same way, unlike a
+/// round-robin cursor whose output depends on how many prior batches
+/// happened to run before it rather than anything about the batch itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BatchComplexity {
+    Light,
+    Heavy,
+}
+
+impl BatchComplexity {
+    fn of(prompt: &str) -> Self {
+        let fill = prompt.chars().count() as f64 / MAX_PROMPT_CHARS as f64;
+        if fill < HEAVY_COMPLEXITY_THRESHOLD {
+            Self::Light
+        } else {
+            Self::Heavy
+        }
+    }
+}
 
 #[derive(Debug, Serialize)]
 struct InferenceRequest {
@@ -156,9 +183,9 @@ pub(super) struct InferenceRoute {
     base_url: String,
     model: String,
     api_key: String,
-    /// Reserved for a future client-side light/heavy tier split mirroring
-    /// dreamsequence-api's server-side routing; not read yet.
-    #[allow(dead_code)]
+    /// A cheaper/faster model for batches BatchComplexity classifies as
+    /// light, mirroring dreamsequence-api's server-side tier split. Also
+    /// used to rank routes for light batches — see `ranked_byok_routes`.
     light_model: Option<String>,
     protocol: Protocol,
 }
@@ -242,9 +269,12 @@ impl GroqClient {
     }
 
     /// Like `new_routed_for_test`, but with multiple named BYOK routes —
-    /// for exercising round-robin selection across them.
+    /// for exercising complexity-based route ranking across them.
     #[doc(hidden)]
-    pub fn new_multi_routed_for_test(cloud: Option<Credentials>, routes: &[(&str, &str)]) -> Result<Self> {
+    pub fn new_multi_routed_for_test(
+        cloud: Option<Credentials>,
+        routes: &[(&str, &str, Option<&str>)],
+    ) -> Result<Self> {
         Ok(Self {
             client: Client::builder()
                 .timeout(Duration::from_secs(5))
@@ -255,12 +285,12 @@ impl GroqClient {
             cloud,
             routes: routes
                 .iter()
-                .map(|(name, base_url)| InferenceRoute {
+                .map(|(name, base_url, light_model)| InferenceRoute {
                     name: (*name).to_string(),
                     api_key: "test-key".to_string(),
                     model: "test-model".to_string(),
                     base_url: base_url.trim_end_matches('/').to_string(),
-                    light_model: None,
+                    light_model: light_model.map(|model| model.to_string()),
                     protocol: Protocol::OpenAiCompatible,
                 })
                 .collect(),
@@ -389,6 +419,7 @@ impl GroqClient {
     const CLOUD_ROUTE: &'static str = "dreamsequence";
 
     async fn analyze_prompt(&self, prompt: &str, batch: usize, total: usize) -> Result<Analysis> {
+        let complexity = BatchComplexity::of(prompt);
         let messages = vec![
             Message {
                 role: "system".to_string(),
@@ -445,7 +476,7 @@ impl GroqClient {
         }
 
         let mut any_byok_attempted = false;
-        for route in self.ordered_byok_routes() {
+        for route in self.ranked_byok_routes(complexity) {
             if self.health.is_circuit_open(&route.name) {
                 tracing::debug!(batch, route = %route.name, "skipping route: circuit open");
                 continue;
@@ -455,7 +486,7 @@ impl GroqClient {
                 continue;
             }
             any_byok_attempted = true;
-            match self.attempt_route(&route, batch, total, &messages).await {
+            match self.attempt_route(&route, batch, total, &messages, complexity).await {
                 Ok(analysis) => return Ok(analysis),
                 Err(error) => failures.push(error.to_string()),
             }
@@ -486,7 +517,7 @@ impl GroqClient {
                 tracing::warn!(batch, route = %route.name, wait_ms = wait.as_millis(), "every route is cooling down; waiting for the soonest to recover");
                 tokio::time::sleep(wait).await;
             }
-            match self.attempt_route(&route, batch, total, &messages).await {
+            match self.attempt_route(&route, batch, total, &messages, complexity).await {
                 Ok(analysis) => return Ok(analysis),
                 Err(error) => failures.push(error.to_string()),
             }
@@ -495,17 +526,23 @@ impl GroqClient {
         anyhow::bail!("all inference routes failed: {}", failures.join("; "))
     }
 
-    /// BYOK routes in round-robin order, rotated per call so consecutive
-    /// batches spread load across configured routes instead of always
-    /// starting from the first one — the core of "load balancing across
-    /// models" when more than one provider is configured.
-    fn ordered_byok_routes(&self) -> Vec<InferenceRoute> {
-        let len = self.routes.len();
-        if len == 0 {
-            return Vec::new();
+    /// BYOK routes ranked deterministically for this batch's complexity,
+    /// instead of an arbitrary rotating order: a route that actually has a
+    /// cheaper light-tier model is tried first for a light batch, so quota
+    /// on routes without one isn't spent on batches that didn't need their
+    /// full-strength model, and a route's rank never depends on how many
+    /// prior batches happened to run before it. Heavy batches keep every
+    /// route in its configured order — no route is a worse fit for those,
+    /// so there's nothing to prefer. Ties keep the configured order too,
+    /// which is itself already deliberate (explicit `DREAMSEQ_BYOK_ROUTES`
+    /// first, generic BYOK next, auto-detected named providers, legacy Groq
+    /// last — see inference_providers::configured_byok_routes).
+    fn ranked_byok_routes(&self, complexity: BatchComplexity) -> Vec<InferenceRoute> {
+        let mut ranked: Vec<&InferenceRoute> = self.routes.iter().collect();
+        if complexity == BatchComplexity::Light {
+            ranked.sort_by_key(|route| route.light_model.is_none());
         }
-        let offset = self.health.next_offset(len);
-        (0..len).map(|i| self.routes[(offset + i) % len].clone()).collect()
+        ranked.into_iter().cloned().collect()
     }
 
     async fn attempt_route(
@@ -514,6 +551,7 @@ impl GroqClient {
         batch: usize,
         total: usize,
         messages: &[Message],
+        complexity: BatchComplexity,
     ) -> Result<Analysis> {
         crate::progress::stage(
             "  🔀",
@@ -530,8 +568,12 @@ impl GroqClient {
             .acquire_owned()
             .await
             .expect("route semaphore is never closed");
+        let model = match complexity {
+            BatchComplexity::Light => route.light_model.clone().unwrap_or_else(|| route.model.clone()),
+            BatchComplexity::Heavy => route.model.clone(),
+        };
         let request = InferenceRequest {
-            model: route.model.clone(),
+            model,
             messages: messages.to_vec(),
             temperature: 0.3,
             max_tokens: 4000,

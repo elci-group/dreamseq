@@ -112,10 +112,11 @@ pub(super) fn configured_byok_routes(legacy_groq_key: &str) -> Result<Vec<Infere
 
 /// Well-known providers that Dreamseq will use automatically when their API
 /// key is present in the environment, mirroring the legacy `GROQ_API_KEY`
-/// auto-detection. Each becomes one more route the load balancer can
-/// round-robin across (see [`super::inference_health::RouteHealth`]); none
-/// is required, and any of them can be overridden or replaced with
-/// `DREAMSEQ_BYOK_ROUTES`.
+/// auto-detection. Each becomes one more route to rank batches across by
+/// complexity (see `BatchComplexity` and `GroqClient::ranked_byok_routes`
+/// in groq.rs) and to track health for (see
+/// [`super::inference_health::RouteHealth`]); none is required, and any of
+/// them can be overridden or replaced with `DREAMSEQ_BYOK_ROUTES`.
 struct NamedProvider {
     name: &'static str,
     base_url: &'static str,
