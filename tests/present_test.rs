@@ -40,6 +40,7 @@ fn anthology_with_interventions(tools: Vec<CandidateTool>) -> Anthology {
         normalized_entries: 53027,
         segments: 42632,
         estimated_input_tokens: 1070791,
+        remote_analysis_consent: Some(dreamseq::RemoteAnalysisConsent::AutoApproved),
     };
     anthology
 }
@@ -301,6 +302,36 @@ fn analysis_summary_counts_interventions() {
 
     assert_eq!(summary.interventions, 2);
     assert_eq!(summary.high_impact, 2); // both sample patterns have impact_score > 0.7
+    assert_eq!(
+        summary.remote_analysis_consent,
+        Some(dreamseq::RemoteAnalysisConsent::AutoApproved)
+    );
+}
+
+#[test]
+fn human_output_shows_remote_analysis_consent() {
+    let report = CompletionReport::from_anthology(
+        &anthology_with_interventions(vec![]),
+        &PathBuf::from("/repo"),
+        &[],
+    );
+    let output = HumanRenderer::new(80, false).render(&report);
+    assert!(
+        strip_ansi(&output).contains("auto-approved"),
+        "human output should disclose how remote analysis consent was obtained"
+    );
+}
+
+#[test]
+fn json_output_includes_remote_analysis_consent() {
+    let report = CompletionReport::from_anthology(
+        &anthology_with_interventions(vec![]),
+        &PathBuf::from("/repo"),
+        &[],
+    );
+    let json = JsonRenderer::render(&report).unwrap();
+    assert!(json.contains("remote_analysis_consent"));
+    assert!(json.contains("auto_approved"));
 }
 
 #[test]

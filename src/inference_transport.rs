@@ -49,6 +49,10 @@ impl GroqClient {
                     tracing::debug!(attempt, error = %error, "transient cloud inference error, retrying");
                 }
             }
+            crate::progress::stage(
+                "  ⏳",
+                &format!("Retrying Dreamsequence cloud inference (attempt {}/{MAX_ATTEMPTS})...", attempt + 1),
+            );
             tokio::time::sleep(backoff(attempt)).await;
         }
         anyhow::bail!("cloud inference exhausted retry attempts")
@@ -95,6 +99,10 @@ impl GroqClient {
                     tracing::debug!(attempt, error = %error, "transient provider error, retrying");
                 }
             }
+            crate::progress::stage(
+                "  ⏳",
+                &format!("Retrying '{}' (attempt {}/{MAX_ATTEMPTS})...", route.name, attempt + 1),
+            );
             tokio::time::sleep(backoff(attempt)).await;
         }
         anyhow::bail!("provider exhausted retry attempts")

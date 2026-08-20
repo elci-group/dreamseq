@@ -31,12 +31,26 @@ pub struct Anthology {
     pub pipeline: PipelineStats,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteAnalysisConsent {
+    /// `allow_remote_analysis` was already `true` in the loaded configuration.
+    PreConfigured,
+    /// Consent was granted automatically because `auto_approve_remote_analysis`
+    /// is enabled.
+    AutoApproved,
+    /// The user explicitly approved the prompt at runtime.
+    Interactive,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PipelineStats {
     pub raw_entries: usize,
     pub normalized_entries: usize,
     pub segments: usize,
     pub estimated_input_tokens: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote_analysis_consent: Option<RemoteAnalysisConsent>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

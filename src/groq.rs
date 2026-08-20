@@ -17,7 +17,12 @@ mod inference_prompt;
 mod inference_transport;
 
 const MAX_PROMPT_CHARS: usize = 48_000;
-const MAX_ATTEMPTS: usize = 3;
+// Each route already retries on the server (see call_inference_route's own
+// attempt loop) before returning failure, so a client-side retry budget this
+// large mostly duplicates that work rather than recovering from anything new.
+// Two attempts keeps a safety net for a genuinely transient blip without
+// stacking another multi-minute wait on top of the server's own retries.
+const MAX_ATTEMPTS: usize = 2;
 
 #[derive(Debug, Serialize)]
 struct InferenceRequest {
@@ -108,7 +113,7 @@ impl GroqClient {
     pub fn new_routed(api_key: &str, cloud: Option<Credentials>) -> Result<Self> {
         Ok(Self {
             client: Client::builder()
-                .timeout(Duration::from_secs(120))
+                .timeout(Duration::from_secs(90))
                 .build()?,
             cloud,
             routes: configured_byok_routes(api_key)?,
@@ -120,7 +125,7 @@ impl GroqClient {
     pub fn new_with_url(api_key: &str, base_url: &str) -> Result<Self> {
         Ok(Self {
             client: Client::builder()
-                .timeout(Duration::from_secs(120))
+                .timeout(Duration::from_secs(90))
                 .no_proxy()
                 .build()?,
             cloud: None,
@@ -169,6 +174,12 @@ impl GroqClient {
         let mut combined = Analysis::default();
         let mut successful_batches = 0usize;
         for (index, prompt) in prompts.iter().enumerate() {
+            if prompts.len() > 1 {
+                crate::progress::stage(
+                    "🧠",
+                    &format!("  Batch {}/{}...", index + 1, prompts.len()),
+                );
+            }
             match self.analyze_prompt(prompt, index + 1, prompts.len()).await {
                 Ok(batch) => {
                     successful_batches += 1;
@@ -205,6 +216,7 @@ impl GroqClient {
         let mut failures = Vec::new();
 
         if let Some(credentials) = &self.cloud {
+            crate::progress::stage("  ☁️", "Trying Dreamsequence cloud inference...");
             let request = InferenceRequest {
                 model: String::new(),
                 messages: messages.clone(),
@@ -235,6 +247,7 @@ impl GroqClient {
         }
 
         for route in &self.routes {
+            crate::progress::stage("  🔀", &format!("Trying BYOK route '{}'...", route.name));
             let request = InferenceRequest {
                 model: route.model.clone(),
                 messages: messages.clone(),

@@ -54,6 +54,7 @@ fn test_config_default() {
     assert!(!config.enable_tts);
     assert!(!config.enable_kaptaind);
     assert!(!config.allow_remote_analysis);
+    assert!(!config.auto_approve_remote_analysis);
     assert_eq!(
         config.groq_api_key,
         std::env::var("GROQ_API_KEY").unwrap_or_default()
@@ -873,7 +874,7 @@ async fn full_pipeline_runs_without_api_key_when_no_logs() {
     config.output_dir =
         std::env::temp_dir().join(format!("dreamseq-output-{}", uuid::Uuid::new_v4()));
 
-    let dreamseq = Dreamseq::new(config).unwrap();
+    let mut dreamseq = Dreamseq::new(config).unwrap();
     let anthology = dreamseq.run().await.unwrap();
 
     assert_eq!(anthology.pipeline.raw_entries, 0);
@@ -912,13 +913,245 @@ async fn nonempty_pipeline_requires_explicit_remote_consent() {
     }];
     config.output_dir = root.join("output");
 
-    let error = Dreamseq::new(config)
-        .unwrap()
+    let mut dreamseq = Dreamseq::new(config).unwrap();
+    let error = dreamseq
         .run()
         .await
         .expect_err("remote analysis should require explicit consent");
     assert!(error.to_string().contains("remote analysis is disabled"));
     fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn nonempty_pipeline_auto_approve_skips_prompt() {
+    use dreamseq::{Dreamseq, DreamseqConfig};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    let root = std::env::temp_dir().join(format!("dreamseq-auto-approve-{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("log.txt"), "analyze this log").unwrap();
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let analysis = serde_json::json!({
+        "model_failures": [],
+        "harness_friction": [],
+        "missing_tooling": [],
+        "workflow_bottlenecks": [],
+        "repeated_commands": [],
+        "repeated_prompts": [],
+        "context_loss": [],
+        "automation_opportunities": []
+    });
+    let analysis_text = serde_json::to_string(&analysis).unwrap();
+    let body = serde_json::json!({
+        "choices": [{"message": {"content": analysis_text}}],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+    });
+    let body_bytes = body.to_string();
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+        body_bytes.len(),
+        body_bytes
+    );
+
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut buf = [0u8; 32768];
+        let _ = socket.read(&mut buf).await.unwrap();
+        socket.write_all(response.as_bytes()).await.unwrap();
+    });
+
+    let mut config = DreamseqConfig::default();
+    config.groq_api_key = "test-key".to_string();
+    config.groq_base_url = Some(format!("http://{}", addr));
+    config.enable_kaptaind = false;
+    config.allow_remote_analysis = false;
+    config.auto_approve_remote_analysis = true;
+    config.harnesses = vec![HarnessConfig {
+        name: "fixture".into(),
+        log_path: root.clone(),
+        log_format: dreamseq::config::LogFormat::Plain,
+        bound_filter: None,
+    }];
+    config.output_dir = root.join("output");
+    config.anthologies_dir = root.join("anthologies");
+
+    let mut dreamseq = Dreamseq::new(config).unwrap();
+    let anthology = dreamseq.run().await.unwrap();
+
+    assert!(anthology.pipeline.segments > 0);
+    assert!(anthology.save().is_ok());
+    assert!(anthology.config.allow_remote_analysis);
+
+    server.abort();
+    let _ = server.await;
+    fs::remove_dir_all(root).ok();
+}
+
+#[tokio::test]
+async fn empty_pipeline_records_no_remote_consent() {
+    use dreamseq::{Dreamseq, DreamseqConfig};
+
+    let mut config = DreamseqConfig::default();
+    config.groq_api_key.clear();
+    config.harnesses.clear();
+    config.anthologies_dir =
+        std::env::temp_dir().join(format!("dreamseq-consent-none-{}", uuid::Uuid::new_v4()));
+    config.output_dir = std::env::temp_dir().join(format!(
+        "dreamseq-consent-none-out-{}",
+        uuid::Uuid::new_v4()
+    ));
+
+    let mut dreamseq = Dreamseq::new(config).unwrap();
+    let anthology = dreamseq.run().await.unwrap();
+
+    assert_eq!(anthology.pipeline.remote_analysis_consent, None);
+
+    fs::remove_dir_all(&anthology.config.anthologies_dir).ok();
+    fs::remove_dir_all(&anthology.config.output_dir).ok();
+}
+
+#[tokio::test]
+async fn preconfigured_remote_consent_is_recorded() {
+    use dreamseq::{Dreamseq, DreamseqConfig, RemoteAnalysisConsent};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    let root = std::env::temp_dir().join(format!("dreamseq-consent-pre-{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("log.txt"), "analyze this log").unwrap();
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let analysis = serde_json::json!({
+        "model_failures": [],
+        "harness_friction": [],
+        "missing_tooling": [],
+        "workflow_bottlenecks": [],
+        "repeated_commands": [],
+        "repeated_prompts": [],
+        "context_loss": [],
+        "automation_opportunities": []
+    });
+    let analysis_text = serde_json::to_string(&analysis).unwrap();
+    let body = serde_json::json!({
+        "choices": [{"message": {"content": analysis_text}}],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+    });
+    let body_bytes = body.to_string();
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+        body_bytes.len(),
+        body_bytes
+    );
+
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut buf = [0u8; 32768];
+        let _ = socket.read(&mut buf).await.unwrap();
+        socket.write_all(response.as_bytes()).await.unwrap();
+    });
+
+    let mut config = DreamseqConfig::default();
+    config.groq_api_key = "test-key".to_string();
+    config.groq_base_url = Some(format!("http://{}", addr));
+    config.enable_kaptaind = false;
+    config.allow_remote_analysis = true;
+    config.auto_approve_remote_analysis = false;
+    config.harnesses = vec![HarnessConfig {
+        name: "fixture".into(),
+        log_path: root.clone(),
+        log_format: dreamseq::config::LogFormat::Plain,
+        bound_filter: None,
+    }];
+    config.output_dir = root.join("output");
+    config.anthologies_dir = root.join("anthologies");
+
+    let mut dreamseq = Dreamseq::new(config).unwrap();
+    let anthology = dreamseq.run().await.unwrap();
+
+    assert_eq!(
+        anthology.pipeline.remote_analysis_consent,
+        Some(RemoteAnalysisConsent::PreConfigured)
+    );
+
+    server.abort();
+    let _ = server.await;
+    fs::remove_dir_all(root).ok();
+}
+
+#[tokio::test]
+async fn auto_approved_remote_consent_is_recorded() {
+    use dreamseq::{Dreamseq, DreamseqConfig, RemoteAnalysisConsent};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    let root = std::env::temp_dir().join(format!("dreamseq-consent-auto-{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("log.txt"), "analyze this log").unwrap();
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let analysis = serde_json::json!({
+        "model_failures": [],
+        "harness_friction": [],
+        "missing_tooling": [],
+        "workflow_bottlenecks": [],
+        "repeated_commands": [],
+        "repeated_prompts": [],
+        "context_loss": [],
+        "automation_opportunities": []
+    });
+    let analysis_text = serde_json::to_string(&analysis).unwrap();
+    let body = serde_json::json!({
+        "choices": [{"message": {"content": analysis_text}}],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+    });
+    let body_bytes = body.to_string();
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+        body_bytes.len(),
+        body_bytes
+    );
+
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut buf = [0u8; 32768];
+        let _ = socket.read(&mut buf).await.unwrap();
+        socket.write_all(response.as_bytes()).await.unwrap();
+    });
+
+    let mut config = DreamseqConfig::default();
+    config.groq_api_key = "test-key".to_string();
+    config.groq_base_url = Some(format!("http://{}", addr));
+    config.enable_kaptaind = false;
+    config.allow_remote_analysis = false;
+    config.auto_approve_remote_analysis = true;
+    config.harnesses = vec![HarnessConfig {
+        name: "fixture".into(),
+        log_path: root.clone(),
+        log_format: dreamseq::config::LogFormat::Plain,
+        bound_filter: None,
+    }];
+    config.output_dir = root.join("output");
+    config.anthologies_dir = root.join("anthologies");
+
+    let mut dreamseq = Dreamseq::new(config).unwrap();
+    let anthology = dreamseq.run().await.unwrap();
+
+    assert_eq!(
+        anthology.pipeline.remote_analysis_consent,
+        Some(RemoteAnalysisConsent::AutoApproved)
+    );
+
+    server.abort();
+    let _ = server.await;
+    fs::remove_dir_all(root).ok();
 }
 
 #[test]
@@ -1014,7 +1247,7 @@ async fn full_pipeline_with_fixture_data() {
     config.output_dir =
         std::env::temp_dir().join(format!("dreamseq-fixture-output-{}", uuid::Uuid::new_v4()));
 
-    let dreamseq = Dreamseq::new(config).unwrap();
+    let mut dreamseq = Dreamseq::new(config).unwrap();
     let mut anthology = dreamseq.run().await.unwrap();
 
     assert!(

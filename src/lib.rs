@@ -12,6 +12,7 @@ pub mod kaptaind;
 pub mod normalization;
 pub mod patterns;
 pub mod present;
+pub mod progress;
 pub mod report;
 mod report_persistence;
 pub mod segmentation;
@@ -24,13 +25,14 @@ pub use groq::GroqClient;
 pub use kaptaind::KaptaindMonitor;
 pub use normalization::Normalizer;
 pub use patterns::PatternExtractor;
-pub use report::{Anthology, Directive, PipelineStats, Priority};
+pub use report::{Anthology, Directive, PipelineStats, Priority, RemoteAnalysisConsent};
 pub use segmentation::SemanticSegmenter;
 pub use steering::SteeringDetector;
 pub use trends::{TrendAnalysis, TrendAnalyzer};
 pub mod goblin_gateway;
 
 use anyhow::Result;
+use std::io::{self, IsTerminal, Write};
 
 /// Main Dreamseq engine
 pub struct Dreamseq {
@@ -87,7 +89,7 @@ impl Dreamseq {
     }
 
     /// Run the complete Dreamseq pipeline
-    pub async fn run(&self) -> Result<Anthology> {
+    pub async fn run(&mut self) -> Result<Anthology> {
         tracing::info!(
             harnesses = self.config.harnesses.len(),
             "starting Dreamseq pipeline"
@@ -101,6 +103,7 @@ impl Dreamseq {
         }
 
         // Step 1: Aggregate logs from all harnesses
+        progress::stage("🔍", "Aggregating harness logs...");
         let (raw_logs, ingestion_report) = self
             .aggregator
             .aggregate_with_report(&self.config.harnesses)
@@ -110,6 +113,7 @@ impl Dreamseq {
         tracing::info!(raw_entries = raw_count, "aggregated log entries");
 
         // Step 2: Normalize logs
+        progress::stage("🧹", "Normalizing log entries...");
         let normalized_logs = self.normalizer.normalize(raw_logs)?;
         tracing::info!(
             normalized_entries = normalized_logs.len(),
@@ -117,6 +121,7 @@ impl Dreamseq {
         );
 
         // Step 3: Semantic segmentation
+        progress::stage("🧩", "Segmenting into semantic chunks...");
         let normalized_count = normalized_logs.len();
         let estimated_input_tokens = normalized_logs
             .iter()
@@ -126,9 +131,11 @@ impl Dreamseq {
         tracing::info!(segments = segments.len(), "created semantic segments");
 
         // Step 4: Analyze with Groq
-        if !segments.is_empty() && !self.config.allow_remote_analysis {
-            anyhow::bail!(
-                "remote analysis is disabled; set allow_remote_analysis=true after reviewing the privacy implications"
+        let consent = self.ensure_remote_analysis_consent(&segments)?;
+        if !segments.is_empty() {
+            progress::stage(
+                "🧠",
+                &format!("Analyzing {} segment(s) via inference...", segments.len()),
             );
         }
         let analysis = self.groq_client.analyze(&segments).await?;
@@ -138,10 +145,12 @@ impl Dreamseq {
         );
 
         // Step 5: Extract patterns
+        progress::stage("🗂️", "Extracting engineering patterns...");
         let patterns = self.pattern_extractor.extract(&analysis)?;
         tracing::info!(patterns = patterns.len(), "extracted engineering patterns");
 
         // Step 6: Detect user steering
+        progress::stage("🧭", "Detecting steering events...");
         let steering_events = self.steering_detector.detect(&segments)?;
         tracing::info!(
             steering_events = steering_events.len(),
@@ -149,15 +158,18 @@ impl Dreamseq {
         );
 
         // Step 7: Generate anthology
+        progress::stage("📖", "Generating anthology...");
         let mut anthology = Anthology::new(patterns, steering_events, self.config.clone());
         anthology.set_pipeline_stats(PipelineStats {
             raw_entries: raw_count,
             normalized_entries: normalized_count,
             segments: segments.len(),
             estimated_input_tokens,
+            remote_analysis_consent: consent,
         });
 
         // Step 8: Cross-day trend analysis
+        progress::stage("📈", "Running cross-day trend analysis...");
         match self.trend_analyzer.analyze(&anthology).await {
             Ok(trends) => {
                 anthology.add_trends(trends);
@@ -168,6 +180,7 @@ impl Dreamseq {
 
         // Step 9: Run kaptaind analysis if enabled
         if let Some(monitor) = &self.kaptaind_monitor {
+            progress::stage("🤖", "Running Kaptaind analysis...");
             match monitor.analyze() {
                 Ok(analysis) => tracing::info!(analysis, "Kaptaind analysis completed"),
                 Err(error) => tracing::warn!(error = %error, "Kaptaind analysis was unavailable"),
@@ -175,6 +188,70 @@ impl Dreamseq {
         }
 
         Ok(anthology)
+    }
+
+    /// Ensure consent for remote analysis is recorded before sending segments to
+    /// an external endpoint. Prompts interactively unless auto-approve is enabled
+    /// or stdin is not a TTY. Returns how consent was obtained, if it was needed.
+    fn ensure_remote_analysis_consent(
+        &mut self,
+        segments: &[segmentation::Segment],
+    ) -> Result<Option<RemoteAnalysisConsent>> {
+        if segments.is_empty() {
+            return Ok(None);
+        }
+
+        if self.config.allow_remote_analysis {
+            tracing::info!(
+                consent = "preconfigured",
+                "remote analysis consent already recorded"
+            );
+            return Ok(Some(RemoteAnalysisConsent::PreConfigured));
+        }
+
+        if self.config.auto_approve_remote_analysis {
+            tracing::info!(
+                consent = "auto_approved",
+                "auto_approve_remote_analysis enabled; granting one-time remote analysis consent"
+            );
+            self.config.allow_remote_analysis = true;
+            return Ok(Some(RemoteAnalysisConsent::AutoApproved));
+        }
+
+        if !io::stdin().is_terminal() {
+            anyhow::bail!(
+                "remote analysis is disabled. Set allow_remote_analysis=true or auto_approve_remote_analysis=true in {} after reviewing the privacy implications",
+                config::DreamseqConfig::path()?.display()
+            );
+        }
+
+        eprintln!();
+        eprintln!(
+            "Remote analysis sends redacted log excerpts to Dreamsequence or your configured BYOK endpoint."
+        );
+        eprintln!("Review the privacy implications before approving.");
+        eprint!("Allow remote analysis for this run? [y/N] ");
+        io::stdout().flush()?;
+
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+        let answer = input.trim().to_lowercase();
+        if answer == "y" || answer == "yes" {
+            tracing::info!(
+                consent = "interactive",
+                "remote analysis consent granted at runtime"
+            );
+            self.config.allow_remote_analysis = true;
+            Ok(Some(RemoteAnalysisConsent::Interactive))
+        } else {
+            tracing::warn!(
+                consent = "declined",
+                "remote analysis consent declined at runtime"
+            );
+            anyhow::bail!(
+                "remote analysis declined; set allow_remote_analysis=true or auto_approve_remote_analysis=true to skip this prompt"
+            )
+        }
     }
 
     async fn save_ingestion_report(

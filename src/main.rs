@@ -119,7 +119,7 @@ async fn main() -> Result<()> {
             };
 
             let repository = std::env::current_dir()?;
-            let dreamseq = Dreamseq::new(config)?;
+            let mut dreamseq = Dreamseq::new(config)?;
             let mut anthology = dreamseq.run().await?;
 
             anthology.generate()?;

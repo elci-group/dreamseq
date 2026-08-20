@@ -19,6 +19,11 @@ pub struct DreamseqConfig {
     /// configured BYOK inference endpoint. Remote analysis is disabled by default.
     #[serde(default)]
     pub allow_remote_analysis: bool,
+    /// When true and `allow_remote_analysis` is false, the pipeline will
+    /// automatically grant one-time consent instead of prompting interactively.
+    /// Intended for non-interactive use after reviewing the privacy implications.
+    #[serde(default)]
+    pub auto_approve_remote_analysis: bool,
     /// Legacy direct-provider override. It bypasses cloud routing and is kept
     /// for compatibility and local integration tests.
     #[serde(default)]
@@ -171,6 +176,7 @@ impl Default for DreamseqConfig {
             enable_tts: false,
             enable_kaptaind: false,
             allow_remote_analysis: false,
+            auto_approve_remote_analysis: false,
             groq_base_url: None,
         }
     }

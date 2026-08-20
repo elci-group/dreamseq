@@ -1,7 +1,9 @@
 // Copyright (c) 2026 Dreamsequence Ltd
 // SPDX-License-Identifier: MIT
 use crate::color::Colorize;
-use crate::report::{Anthology, CandidateTool, InterventionCategory, Priority};
+use crate::report::{
+    Anthology, CandidateTool, InterventionCategory, Priority, RemoteAnalysisConsent,
+};
 use anyhow::Result;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -112,6 +114,7 @@ pub struct AnalysisSummary {
     pub patterns: usize,
     pub interventions: usize,
     pub high_impact: usize,
+    pub remote_analysis_consent: Option<RemoteAnalysisConsent>,
 }
 
 impl AnalysisSummary {
@@ -130,6 +133,7 @@ impl AnalysisSummary {
             patterns: anthology.patterns.len(),
             interventions: anthology.candidate_tools.len(),
             high_impact,
+            remote_analysis_consent: anthology.pipeline.remote_analysis_consent,
         }
     }
 }
@@ -316,6 +320,13 @@ impl HumanRenderer {
             "  {:>15} interventions",
             format_number(a.interventions).dimmed()
         ));
+        if let Some(consent) = a.remote_analysis_consent {
+            lines.push(format!(
+                "  {:>15} {}",
+                "consent".dimmed(),
+                consent_label(consent)
+            ));
+        }
     }
 
     fn render_findings(&self, lines: &mut Vec<String>, report: &CompletionReport) {
@@ -417,6 +428,14 @@ pub struct JsonRenderer;
 impl JsonRenderer {
     pub fn render(report: &CompletionReport) -> Result<String> {
         Ok(serde_json::to_string_pretty(report)?)
+    }
+}
+
+fn consent_label(consent: RemoteAnalysisConsent) -> String {
+    match consent {
+        RemoteAnalysisConsent::PreConfigured => "preconfigured".to_string(),
+        RemoteAnalysisConsent::AutoApproved => "auto-approved".to_string(),
+        RemoteAnalysisConsent::Interactive => "interactive".to_string(),
     }
 }
 
