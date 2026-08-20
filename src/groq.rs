@@ -9,7 +9,10 @@ use crate::segmentation::Segment;
 use anyhow::Result;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::Semaphore;
+use tokio::task::JoinSet;
 
 #[path = "inference_prompt.rs"]
 mod inference_prompt;
@@ -23,6 +26,14 @@ const MAX_PROMPT_CHARS: usize = 48_000;
 // Two attempts keeps a safety net for a genuinely transient blip without
 // stacking another multi-minute wait on top of the server's own retries.
 const MAX_ATTEMPTS: usize = 2;
+// Batches were previously processed one at a time, so a large anthology
+// (hundreds to thousands of segments) could take tens of minutes even
+// though each individual batch completes in about a second — the pipeline
+// was network-latency-bound, not throughput-bound. A modest concurrency
+// cap gets most of the available speedup while staying well under typical
+// provider rate limits (kept conservative since BYOK routes vary widely,
+// e.g. Kimi's documented ~3 requests/minute cap).
+const BATCH_CONCURRENCY: usize = 4;
 
 #[derive(Debug, Serialize)]
 struct InferenceRequest {
@@ -99,6 +110,7 @@ struct InferenceOutput {
     model: String,
 }
 
+#[derive(Clone)]
 pub struct GroqClient {
     client: Client,
     cloud: Option<Credentials>,
@@ -171,16 +183,30 @@ impl GroqClient {
             );
         }
         let prompts = self.build_analysis_prompts(segments);
+        let total = prompts.len();
+        let semaphore = Arc::new(Semaphore::new(BATCH_CONCURRENCY.min(total).max(1)));
+        let mut tasks = JoinSet::new();
+        for (index, prompt) in prompts.into_iter().enumerate() {
+            let permit = Arc::clone(&semaphore)
+                .acquire_owned()
+                .await
+                .expect("batch semaphore is never closed");
+            let client = self.clone();
+            tasks.spawn(async move {
+                let _permit = permit;
+                (index, client.analyze_prompt(&prompt, index + 1, total).await)
+            });
+        }
+
         let mut combined = Analysis::default();
         let mut successful_batches = 0usize;
-        for (index, prompt) in prompts.iter().enumerate() {
-            if prompts.len() > 1 {
-                crate::progress::stage(
-                    "🧠",
-                    &format!("  Batch {}/{}...", index + 1, prompts.len()),
-                );
-            }
-            match self.analyze_prompt(prompt, index + 1, prompts.len()).await {
+        let mut completed = 0usize;
+        while let Some(outcome) = tasks.join_next().await {
+            let (index, result) = outcome.map_err(|error| {
+                anyhow::anyhow!("inference batch task failed to complete: {error}")
+            })?;
+            completed += 1;
+            match result {
                 Ok(batch) => {
                     successful_batches += 1;
                     combined.merge(batch);
@@ -188,11 +214,14 @@ impl GroqClient {
                 Err(error) => {
                     tracing::warn!(
                         batch = index + 1,
-                        total_batches = prompts.len(),
+                        total_batches = total,
                         error = %error,
                         "skipping malformed inference batch"
                     );
                 }
+            }
+            if total > 1 {
+                crate::progress::stage("🧠", &format!("  {completed}/{total} batches complete..."));
             }
         }
         if successful_batches == 0 {
@@ -216,7 +245,10 @@ impl GroqClient {
         let mut failures = Vec::new();
 
         if let Some(credentials) = &self.cloud {
-            crate::progress::stage("  ☁️", "Trying Dreamsequence cloud inference...");
+            crate::progress::stage(
+                "  ☁️",
+                &format!("[batch {batch}/{total}] Trying Dreamsequence cloud inference..."),
+            );
             let request = InferenceRequest {
                 model: String::new(),
                 messages: messages.clone(),
@@ -247,7 +279,10 @@ impl GroqClient {
         }
 
         for route in &self.routes {
-            crate::progress::stage("  🔀", &format!("Trying BYOK route '{}'...", route.name));
+            crate::progress::stage(
+                "  🔀",
+                &format!("[batch {batch}/{total}] Trying BYOK route '{}'...", route.name),
+            );
             let request = InferenceRequest {
                 model: route.model.clone(),
                 messages: messages.clone(),
