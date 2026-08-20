@@ -377,6 +377,215 @@ async fn routed_inference_prefers_dreamsequence_cloud() {
 }
 
 #[tokio::test]
+async fn a_rate_limited_route_is_not_hit_again_until_its_cooldown_expires() {
+    use dreamseq::cloud::Credentials;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    // The cloud route always answers 429, so every batch should record a
+    // cooldown for it instead of retrying it on the very next batch. Each
+    // `analyze()` call's own client-side retry loop (MAX_ATTEMPTS) will
+    // still hit this route more than once *within* the first call — the
+    // behavior under test is that the *second* call adds no further hits.
+    let cloud = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let cloud_address = cloud.local_addr().unwrap();
+    let cloud_hits = Arc::new(AtomicUsize::new(0));
+    let cloud_hits_counter = Arc::clone(&cloud_hits);
+    let cloud_server = tokio::spawn(async move {
+        for _ in 0..4 {
+            let Ok(Ok((mut socket, _))) =
+                tokio::time::timeout(std::time::Duration::from_secs(2), cloud.accept()).await
+            else {
+                break;
+            };
+            cloud_hits_counter.fetch_add(1, Ordering::SeqCst);
+            let mut buf = vec![0u8; 8192];
+            let _ = socket.read(&mut buf).await;
+            let _ = socket
+                .write_all(http_response(429, "{\"error\":\"rate limited\"}").as_bytes())
+                .await;
+            let _ = socket.shutdown().await;
+        }
+    });
+
+    // The BYOK fallback always succeeds, so both batches complete via it
+    // regardless of the cloud route's cooldown.
+    let byok = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let byok_address = byok.local_addr().unwrap();
+    let body = serde_json::json!({
+        "choices": [{"message": {"content": empty_analysis_json().to_string()}}],
+        "usage": {"total_tokens": 15}
+    })
+    .to_string();
+    let response = http_response(200, &body);
+    let byok_server = tokio::spawn(async move {
+        for _ in 0..3 {
+            let (mut socket, _) = byok.accept().await.unwrap();
+            let mut buf = vec![0u8; 65536];
+            let _ = socket.read(&mut buf).await;
+            socket.write_all(response.as_bytes()).await.unwrap();
+        }
+    });
+
+    let credentials = Credentials {
+        api_url: format!("http://{cloud_address}"),
+        access_token: "ds_test".into(),
+        account_id: "user:test".into(),
+        device_id: "dev_test".into(),
+        paired_at: chrono::Utc::now(),
+    };
+    let client = GroqClient::new_routed_for_test(
+        Some(credentials),
+        "byok_test",
+        &format!("http://{byok_address}"),
+    )
+    .unwrap();
+
+    // First batch: cloud is tried (and retried up to the client's own
+    // MAX_ATTEMPTS, since 429 is retryable), gets 429 every time, and the
+    // batch still succeeds via the BYOK fallback.
+    client
+        .analyze(&[segment_with_content("first batch")])
+        .await
+        .unwrap();
+    let hits_from_first_batch_alone = cloud_hits.load(Ordering::SeqCst);
+    assert!(
+        (1..=2).contains(&hits_from_first_batch_alone),
+        "expected only the first batch's own retry attempts (at most MAX_ATTEMPTS) to reach the cloud route, got {hits_from_first_batch_alone}"
+    );
+
+    // Second and third batches, same client (so its route-health state
+    // persists): the cloud route should now be skipped outright rather than
+    // hit again, since both fall well within the cooldown the first 429
+    // started — no new hits should land on it.
+    client
+        .analyze(&[segment_with_content("second batch")])
+        .await
+        .unwrap();
+    client
+        .analyze(&[segment_with_content("third batch")])
+        .await
+        .unwrap();
+
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), cloud_server).await;
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), byok_server).await;
+    assert_eq!(
+        cloud_hits.load(Ordering::SeqCst),
+        hits_from_first_batch_alone,
+        "later batches should skip the cooling-down cloud route entirely, not hit it again"
+    );
+}
+
+#[tokio::test]
+async fn consecutive_batches_round_robin_across_configured_routes() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    async fn always_succeeds_server(listener: TcpListener, hits: Arc<AtomicUsize>, expected: usize) {
+        for _ in 0..expected {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            hits.fetch_add(1, Ordering::SeqCst);
+            let mut buf = vec![0u8; 65536];
+            let _ = socket.read(&mut buf).await;
+            let body = serde_json::json!({
+                "choices": [{"message": {"content": empty_analysis_json().to_string()}}],
+                "usage": {"total_tokens": 15}
+            })
+            .to_string();
+            let _ = socket.write_all(http_response(200, &body).as_bytes()).await;
+        }
+    }
+
+    let route_a = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let route_a_addr = route_a.local_addr().unwrap();
+    let route_b = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let route_b_addr = route_b.local_addr().unwrap();
+
+    let hits_a = Arc::new(AtomicUsize::new(0));
+    let hits_b = Arc::new(AtomicUsize::new(0));
+    let server_a = tokio::spawn(always_succeeds_server(route_a, Arc::clone(&hits_a), 2));
+    let server_b = tokio::spawn(always_succeeds_server(route_b, Arc::clone(&hits_b), 2));
+
+    let client = GroqClient::new_multi_routed_for_test(
+        None,
+        &[
+            ("route-a", &format!("http://{route_a_addr}")),
+            ("route-b", &format!("http://{route_b_addr}")),
+        ],
+    )
+    .unwrap();
+
+    // Four separate single-batch runs (mirroring four separate `dreamseq
+    // run` invocations, or four sequential batches within one) should
+    // alternate which route is tried first rather than always hammering
+    // whichever route sorts first.
+    for i in 0..4 {
+        client
+            .analyze(&[segment_with_content(&format!("batch {i}"))])
+            .await
+            .unwrap();
+    }
+
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), server_a).await;
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), server_b).await;
+    assert_eq!(
+        hits_a.load(Ordering::SeqCst),
+        2,
+        "load should be split evenly across both configured routes, not concentrated on one"
+    );
+    assert_eq!(
+        hits_b.load(Ordering::SeqCst),
+        2,
+        "load should be split evenly across both configured routes, not concentrated on one"
+    );
+}
+
+#[tokio::test]
+async fn dispatches_to_an_anthropic_shaped_route_correctly() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let body = serde_json::json!({
+        "content": [{"type": "text", "text": empty_analysis_json().to_string()}],
+        "usage": {"input_tokens": 10, "output_tokens": 5}
+    })
+    .to_string();
+    let response = http_response(200, &body);
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut buf = vec![0u8; 65536];
+        let count = socket.read(&mut buf).await.unwrap();
+        let request = String::from_utf8_lossy(&buf[..count]);
+        assert!(
+            request.contains("POST /v1/messages"),
+            "anthropic routes must use /v1/messages, not /chat/completions"
+        );
+        assert!(
+            request.to_ascii_lowercase().contains("x-api-key: test-key"),
+            "anthropic auth is x-api-key, not a bearer token"
+        );
+        assert!(
+            !request.contains("\"role\":\"system\""),
+            "the system message must be lifted into the top-level `system` field, not left in `messages`"
+        );
+        socket.write_all(response.as_bytes()).await.unwrap();
+    });
+
+    let client = GroqClient::new_anthropic_routed_for_test(&format!("http://{addr}")).unwrap();
+    client
+        .analyze(&[segment_with_content("anthropic dispatch")])
+        .await
+        .unwrap();
+    server.await.unwrap();
+}
+
+#[tokio::test]
 async fn routed_inference_falls_back_to_byok() {
     use dreamseq::cloud::Credentials;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};

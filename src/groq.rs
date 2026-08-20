@@ -14,8 +14,12 @@ use std::time::Duration;
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
+#[path = "inference_health.rs"]
+mod inference_health;
 #[path = "inference_prompt.rs"]
 mod inference_prompt;
+#[path = "inference_providers.rs"]
+mod inference_providers;
 #[path = "inference_transport.rs"]
 mod inference_transport;
 
@@ -34,6 +38,13 @@ const MAX_ATTEMPTS: usize = 2;
 // provider rate limits (kept conservative since BYOK routes vary widely,
 // e.g. Kimi's documented ~3 requests/minute cap).
 const BATCH_CONCURRENCY: usize = 4;
+// A per-route cap, independent of BATCH_CONCURRENCY: without it, every
+// concurrent batch that lands on the same route (the common case with a
+// single configured provider) piles onto that one route's quota at once.
+// Capping it below BATCH_CONCURRENCY means a single hot route can't absorb
+// the whole global budget, while multiple configured routes still add up
+// to real parallelism across providers.
+const ROUTE_CONCURRENCY: usize = 2;
 
 #[derive(Debug, Serialize)]
 struct InferenceRequest {
@@ -87,20 +98,69 @@ struct CloudInferenceResponse {
     model: String,
 }
 
+#[derive(Debug, Serialize)]
+struct AnthropicRequest<'a> {
+    model: &'a str,
+    max_tokens: usize,
+    temperature: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    system: Option<&'a str>,
+    messages: Vec<AnthropicMessage<'a>>,
+}
+
+#[derive(Debug, Serialize)]
+struct AnthropicMessage<'a> {
+    role: &'a str,
+    content: &'a str,
+}
+
 #[derive(Debug, Deserialize)]
-struct ByokRouteConfig {
-    name: String,
-    base_url: String,
-    model: String,
-    api_key_env: String,
+struct AnthropicResponse {
+    content: Vec<AnthropicContentBlock>,
+    #[serde(default)]
+    usage: AnthropicUsage,
+}
+
+#[derive(Debug, Deserialize)]
+struct AnthropicContentBlock {
+    #[serde(rename = "type", default)]
+    block_type: String,
+    #[serde(default)]
+    text: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct AnthropicUsage {
+    #[serde(default)]
+    input_tokens: usize,
+    #[serde(default)]
+    output_tokens: usize,
+}
+
+/// Which request/response shape a route speaks. Most third-party providers
+/// (and all of Dreamsequence's own BYOK defaults before this) are OpenAI-
+/// compatible; Anthropic's Messages API is shaped differently enough
+/// (`x-api-key` auth, a top-level `system` field, typed content blocks) to
+/// need its own dispatch — see `request_anthropic` in inference_transport.rs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum Protocol {
+    #[default]
+    OpenAiCompatible,
+    Anthropic,
 }
 
 #[derive(Clone)]
-struct InferenceRoute {
+pub(super) struct InferenceRoute {
     name: String,
     base_url: String,
     model: String,
     api_key: String,
+    /// Reserved for a future client-side light/heavy tier split mirroring
+    /// dreamsequence-api's server-side routing; not read yet.
+    #[allow(dead_code)]
+    light_model: Option<String>,
+    protocol: Protocol,
 }
 
 struct InferenceOutput {
@@ -115,6 +175,7 @@ pub struct GroqClient {
     client: Client,
     cloud: Option<Credentials>,
     routes: Vec<InferenceRoute>,
+    health: Arc<inference_health::RouteHealth>,
 }
 
 impl GroqClient {
@@ -128,7 +189,8 @@ impl GroqClient {
                 .timeout(Duration::from_secs(90))
                 .build()?,
             cloud,
-            routes: configured_byok_routes(api_key)?,
+            routes: inference_providers::configured_byok_routes(api_key)?,
+            health: Arc::new(inference_health::RouteHealth::new()),
         })
     }
 
@@ -146,7 +208,10 @@ impl GroqClient {
                 api_key: api_key.to_string(),
                 model: "openai/gpt-oss-120b".to_string(),
                 base_url: base_url.trim_end_matches('/').to_string(),
+                light_model: None,
+                protocol: Protocol::OpenAiCompatible,
             }],
+            health: Arc::new(inference_health::RouteHealth::new()),
         })
     }
 
@@ -169,7 +234,61 @@ impl GroqClient {
                 api_key: api_key.to_string(),
                 model: "test-model".to_string(),
                 base_url: fallback_url.trim_end_matches('/').to_string(),
+                light_model: None,
+                protocol: Protocol::OpenAiCompatible,
             }],
+            health: Arc::new(inference_health::RouteHealth::new()),
+        })
+    }
+
+    /// Like `new_routed_for_test`, but with multiple named BYOK routes —
+    /// for exercising round-robin selection across them.
+    #[doc(hidden)]
+    pub fn new_multi_routed_for_test(cloud: Option<Credentials>, routes: &[(&str, &str)]) -> Result<Self> {
+        Ok(Self {
+            client: Client::builder()
+                .timeout(Duration::from_secs(5))
+                .pool_idle_timeout(Duration::from_millis(0))
+                .pool_max_idle_per_host(0)
+                .no_proxy()
+                .build()?,
+            cloud,
+            routes: routes
+                .iter()
+                .map(|(name, base_url)| InferenceRoute {
+                    name: (*name).to_string(),
+                    api_key: "test-key".to_string(),
+                    model: "test-model".to_string(),
+                    base_url: base_url.trim_end_matches('/').to_string(),
+                    light_model: None,
+                    protocol: Protocol::OpenAiCompatible,
+                })
+                .collect(),
+            health: Arc::new(inference_health::RouteHealth::new()),
+        })
+    }
+
+    /// A single route speaking the Anthropic protocol, for exercising
+    /// `request_anthropic`'s request/response shape end-to-end.
+    #[doc(hidden)]
+    pub fn new_anthropic_routed_for_test(base_url: &str) -> Result<Self> {
+        Ok(Self {
+            client: Client::builder()
+                .timeout(Duration::from_secs(5))
+                .pool_idle_timeout(Duration::from_millis(0))
+                .pool_max_idle_per_host(0)
+                .no_proxy()
+                .build()?,
+            cloud: None,
+            routes: vec![InferenceRoute {
+                name: "anthropic-test".to_string(),
+                api_key: "test-key".to_string(),
+                model: "test-model".to_string(),
+                base_url: base_url.trim_end_matches('/').to_string(),
+                light_model: None,
+                protocol: Protocol::Anthropic,
+            }],
+            health: Arc::new(inference_health::RouteHealth::new()),
         })
     }
 
@@ -228,8 +347,46 @@ impl GroqClient {
             anyhow::bail!("all inference batches failed")
         }
         combined.sanitize();
+        self.report_route_health(total);
         Ok(combined)
     }
+
+    /// Surface cooldowns/circuit-opens that happened during the run so the
+    /// quota pressure that triggered them is visible by default, not just
+    /// with --verbose. Silent when nothing degraded.
+    fn report_route_health(&self, total_batches: usize) {
+        for snapshot in self.health.snapshot() {
+            tracing::info!(
+                route = %snapshot.name,
+                attempts = snapshot.attempts,
+                successes = snapshot.successes,
+                failures = snapshot.failures,
+                total_cooldown_ms = snapshot.total_cooldown.as_millis(),
+                circuit_open = snapshot.circuit_open,
+                "route health summary"
+            );
+            if total_batches > 1 && (snapshot.failures > 0 || snapshot.circuit_open) {
+                let state = if snapshot.circuit_open {
+                    "circuit-open (stopped retrying)"
+                } else {
+                    "recovered"
+                };
+                crate::progress::stage(
+                    "  🩺",
+                    &format!(
+                        "Route '{}': {}/{} succeeded, {} cooldown(s) totaling {:.1}s — {state}",
+                        snapshot.name,
+                        snapshot.successes,
+                        snapshot.attempts,
+                        snapshot.failures,
+                        snapshot.total_cooldown.as_secs_f64()
+                    ),
+                );
+            }
+        }
+    }
+
+    const CLOUD_ROUTE: &'static str = "dreamsequence";
 
     async fn analyze_prompt(&self, prompt: &str, batch: usize, total: usize) -> Result<Analysis> {
         let messages = vec![
@@ -245,69 +402,186 @@ impl GroqClient {
         let mut failures = Vec::new();
 
         if let Some(credentials) = &self.cloud {
-            crate::progress::stage(
-                "  ☁️",
-                &format!("[batch {batch}/{total}] Trying Dreamsequence cloud inference..."),
-            );
-            let request = InferenceRequest {
-                model: String::new(),
-                messages: messages.clone(),
-                temperature: 0.3,
-                max_tokens: 4000,
-            };
-            match self.request_cloud(credentials, &request).await {
-                Ok(output) => match self.parse_analysis(&output.content) {
-                    Ok(analysis) => {
-                        tracing::info!(batch, total_batches = total, provider = %output.provider, model = %output.model, tokens_used = output.tokens_used, "Dreamsequence inference batch completed");
-                        return Ok(analysis);
-                    }
+            if self.health.is_circuit_open(Self::CLOUD_ROUTE) {
+                tracing::debug!(batch, route = Self::CLOUD_ROUTE, "skipping cloud route: circuit open");
+            } else if let Some(wait) = self.health.remaining_cooldown(Self::CLOUD_ROUTE) {
+                tracing::debug!(batch, route = Self::CLOUD_ROUTE, wait_ms = wait.as_millis(), "skipping cloud route: cooling down");
+            } else {
+                crate::progress::stage(
+                    "  ☁️",
+                    &format!("[batch {batch}/{total}] Trying Dreamsequence cloud inference..."),
+                );
+                let request = InferenceRequest {
+                    model: String::new(),
+                    messages: messages.clone(),
+                    temperature: 0.3,
+                    max_tokens: 4000,
+                };
+                self.health.record_attempt(Self::CLOUD_ROUTE);
+                match self.request_cloud(credentials, &request).await {
+                    Ok(output) => match self.parse_analysis(&output.content) {
+                        Ok(analysis) => {
+                            self.health.record_success(Self::CLOUD_ROUTE);
+                            tracing::info!(batch, total_batches = total, provider = %output.provider, model = %output.model, tokens_used = output.tokens_used, "Dreamsequence inference batch completed");
+                            return Ok(analysis);
+                        }
+                        Err(error) => {
+                            tracing::warn!(batch, provider = "dreamsequence", error = %error, "server inference returned invalid analysis");
+                            failures.push(format!("dreamsequence: invalid analysis ({error})"))
+                        }
+                    },
                     Err(error) => {
-                        tracing::warn!(batch, provider = "dreamsequence", error = %error, "server inference returned invalid analysis");
-                        failures.push(format!("dreamsequence: invalid analysis ({error})"))
+                        let cooldown = self.record_route_failure(Self::CLOUD_ROUTE, &error);
+                        tracing::warn!(batch, provider = "dreamsequence", error = %error, cooldown_ms = cooldown.as_millis(), "server inference request failed");
+                        failures.push(format!("dreamsequence: {error}"));
                     }
-                },
-                Err(error) => {
-                    tracing::warn!(batch, provider = "dreamsequence", error = %error, "server inference request failed");
-                    failures.push(format!("dreamsequence: {error}"));
                 }
+                tracing::warn!(
+                    batch = batch,
+                    fallback = "byok",
+                    "Dreamsequence inference unavailable; trying BYOK routes"
+                );
             }
-            tracing::warn!(
-                batch = batch,
-                fallback = "byok",
-                "Dreamsequence inference unavailable; trying BYOK routes"
-            );
         }
 
-        for route in &self.routes {
-            crate::progress::stage(
-                "  🔀",
-                &format!("[batch {batch}/{total}] Trying BYOK route '{}'...", route.name),
-            );
-            let request = InferenceRequest {
-                model: route.model.clone(),
-                messages: messages.clone(),
-                temperature: 0.3,
-                max_tokens: 4000,
-            };
-            match self.request_openai_compatible(route, &request).await {
-                Ok(output) => match self.parse_analysis(&output.content) {
-                    Ok(analysis) => {
-                        tracing::info!(batch, total_batches = total, provider = %output.provider, model = %output.model, tokens_used = output.tokens_used, "BYOK inference batch completed");
-                        return Ok(analysis);
-                    }
-                    Err(error) => {
-                        tracing::warn!(batch, provider = %route.name, error = %error, "BYOK inference returned invalid analysis");
-                        failures.push(format!("{}: invalid analysis ({error})", route.name))
-                    }
-                },
-                Err(error) => {
-                    tracing::warn!(batch, provider = %route.name, error = %error, "BYOK inference request failed");
-                    failures.push(format!("{}: {error}", route.name));
-                }
+        let mut any_byok_attempted = false;
+        for route in self.ordered_byok_routes() {
+            if self.health.is_circuit_open(&route.name) {
+                tracing::debug!(batch, route = %route.name, "skipping route: circuit open");
+                continue;
+            }
+            if let Some(wait) = self.health.remaining_cooldown(&route.name) {
+                tracing::debug!(batch, route = %route.name, wait_ms = wait.as_millis(), "skipping route: cooling down");
+                continue;
+            }
+            any_byok_attempted = true;
+            match self.attempt_route(&route, batch, total, &messages).await {
+                Ok(analysis) => return Ok(analysis),
+                Err(error) => failures.push(error.to_string()),
+            }
+        }
+
+        // No BYOK route was actually attempted — every one of them (if any
+        // are configured) is mid-cooldown or circuit-open. Rather than
+        // hard-failing the whole batch, wait for whichever route recovers
+        // soonest and give it one try. A circuit-open route never qualifies,
+        // since waiting cannot fix it.
+        if !any_byok_attempted
+            && let Some(route) = self
+                .routes
+                .iter()
+                .filter(|route| !self.health.is_circuit_open(&route.name))
+                .min_by_key(|route| self.health.remaining_cooldown(&route.name).unwrap_or(Duration::ZERO))
+        {
+            let route = route.clone();
+            if let Some(wait) = self.health.remaining_cooldown(&route.name) {
+                crate::progress::stage(
+                    "  ⏳",
+                    &format!(
+                        "[batch {batch}/{total}] Every route is cooling down; waiting {:.0}s for '{}'...",
+                        wait.as_secs_f64().ceil(),
+                        route.name
+                    ),
+                );
+                tracing::warn!(batch, route = %route.name, wait_ms = wait.as_millis(), "every route is cooling down; waiting for the soonest to recover");
+                tokio::time::sleep(wait).await;
+            }
+            match self.attempt_route(&route, batch, total, &messages).await {
+                Ok(analysis) => return Ok(analysis),
+                Err(error) => failures.push(error.to_string()),
             }
         }
 
         anyhow::bail!("all inference routes failed: {}", failures.join("; "))
+    }
+
+    /// BYOK routes in round-robin order, rotated per call so consecutive
+    /// batches spread load across configured routes instead of always
+    /// starting from the first one — the core of "load balancing across
+    /// models" when more than one provider is configured.
+    fn ordered_byok_routes(&self) -> Vec<InferenceRoute> {
+        let len = self.routes.len();
+        if len == 0 {
+            return Vec::new();
+        }
+        let offset = self.health.next_offset(len);
+        (0..len).map(|i| self.routes[(offset + i) % len].clone()).collect()
+    }
+
+    async fn attempt_route(
+        &self,
+        route: &InferenceRoute,
+        batch: usize,
+        total: usize,
+        messages: &[Message],
+    ) -> Result<Analysis> {
+        crate::progress::stage(
+            "  🔀",
+            &format!("[batch {batch}/{total}] Trying BYOK route '{}'...", route.name),
+        );
+        // Bounds concurrent in-flight requests to this specific route,
+        // independent of the global BATCH_CONCURRENCY cap — otherwise every
+        // concurrently-running batch that lands on the same route (the
+        // common case with a single configured provider) piles onto that
+        // one route's quota simultaneously.
+        let permit = self
+            .health
+            .route_semaphore(&route.name, ROUTE_CONCURRENCY)
+            .acquire_owned()
+            .await
+            .expect("route semaphore is never closed");
+        let request = InferenceRequest {
+            model: route.model.clone(),
+            messages: messages.to_vec(),
+            temperature: 0.3,
+            max_tokens: 4000,
+        };
+        self.health.record_attempt(&route.name);
+        let outcome = match route.protocol {
+            Protocol::OpenAiCompatible => self.request_openai_compatible(route, &request).await,
+            Protocol::Anthropic => self.request_anthropic(route, &request).await,
+        };
+        drop(permit);
+        match outcome {
+            Ok(output) => match self.parse_analysis(&output.content) {
+                Ok(analysis) => {
+                    self.health.record_success(&route.name);
+                    tracing::info!(batch, total_batches = total, provider = %output.provider, model = %output.model, tokens_used = output.tokens_used, "BYOK inference batch completed");
+                    Ok(analysis)
+                }
+                Err(error) => {
+                    tracing::warn!(batch, provider = %route.name, error = %error, "BYOK inference returned invalid analysis");
+                    anyhow::bail!("{}: invalid analysis ({error})", route.name)
+                }
+            },
+            Err(error) => {
+                let cooldown = self.record_route_failure(&route.name, &error);
+                tracing::warn!(batch, provider = %route.name, error = %error, cooldown_ms = cooldown.as_millis(), "BYOK inference request failed");
+                anyhow::bail!("{}: {error}", route.name)
+            }
+        }
+    }
+
+    /// Classify a failed request and update the route's health accordingly:
+    /// an auth rejection (401/403) opens the circuit permanently, since no
+    /// amount of waiting fixes a bad key; anything else — including 429
+    /// quota errors, which is what motivated this — starts an exponentially
+    /// escalating cooldown so repeated failures back off further each time
+    /// instead of retrying at the same pace forever.
+    fn record_route_failure(&self, route_name: &str, error: &anyhow::Error) -> Duration {
+        let status = error
+            .downcast_ref::<inference_transport::InferenceError>()
+            .and_then(|error| error.status);
+        if matches!(status, Some(401) | Some(403)) {
+            self.health.open_circuit(route_name, &error.to_string());
+            return Duration::ZERO;
+        }
+        let base_cooldown = if status == Some(429) {
+            Duration::from_secs(5)
+        } else {
+            Duration::from_secs(2)
+        };
+        self.health.record_failure(route_name, base_cooldown)
     }
 
     fn parse_analysis(&self, text: &str) -> Result<Analysis> {
@@ -466,79 +740,6 @@ fn normalize_analysis_items(value: &mut serde_json::Value) {
             *item = serde_json::Value::Object(normalized);
         }
     }
-}
-
-fn configured_byok_routes(legacy_groq_key: &str) -> Result<Vec<InferenceRoute>> {
-    let mut routes = Vec::new();
-    if let Ok(encoded) = std::env::var("DREAMSEQ_BYOK_ROUTES")
-        && !encoded.trim().is_empty()
-    {
-        let configured: Vec<ByokRouteConfig> = serde_json::from_str(&encoded)
-            .map_err(|error| anyhow::anyhow!("DREAMSEQ_BYOK_ROUTES is invalid JSON: {error}"))?;
-        for route in configured {
-            validate_provider_url(&route.base_url)?;
-            match std::env::var(&route.api_key_env) {
-                Ok(api_key) if !api_key.trim().is_empty() => routes.push(InferenceRoute {
-                    name: route.name,
-                    base_url: route.base_url.trim_end_matches('/').to_string(),
-                    model: route.model,
-                    api_key,
-                }),
-                _ => tracing::warn!(
-                    provider = %route.name,
-                    key_environment = %route.api_key_env,
-                    "skipping BYOK route because its key is unavailable"
-                ),
-            }
-        }
-    }
-
-    let generic_key = std::env::var("DREAMSEQ_BYOK_API_KEY").unwrap_or_default();
-    let generic_url = std::env::var("DREAMSEQ_BYOK_BASE_URL").unwrap_or_default();
-    let generic_model = std::env::var("DREAMSEQ_BYOK_MODEL").unwrap_or_default();
-    if !generic_key.trim().is_empty()
-        || !generic_url.trim().is_empty()
-        || !generic_model.trim().is_empty()
-    {
-        if generic_key.trim().is_empty()
-            || generic_url.trim().is_empty()
-            || generic_model.trim().is_empty()
-        {
-            anyhow::bail!(
-                "DREAMSEQ_BYOK_API_KEY, DREAMSEQ_BYOK_BASE_URL, and DREAMSEQ_BYOK_MODEL must be set together"
-            );
-        }
-        validate_provider_url(&generic_url)?;
-        routes.push(InferenceRoute {
-            name: "byok".to_string(),
-            base_url: generic_url.trim_end_matches('/').to_string(),
-            model: generic_model,
-            api_key: generic_key,
-        });
-    }
-
-    if !legacy_groq_key.trim().is_empty()
-        && !routes
-            .iter()
-            .any(|route| route.base_url == "https://api.groq.com/openai/v1")
-    {
-        routes.push(InferenceRoute {
-            name: "groq".to_string(),
-            base_url: "https://api.groq.com/openai/v1".to_string(),
-            model: std::env::var("GROQ_MODEL")
-                .unwrap_or_else(|_| "openai/gpt-oss-120b".to_string()),
-            api_key: legacy_groq_key.to_string(),
-        });
-    }
-    Ok(routes)
-}
-
-fn validate_provider_url(url: &str) -> Result<()> {
-    let local = url.starts_with("http://127.0.0.1") || url.starts_with("http://localhost");
-    if !url.starts_with("https://") && !local {
-        anyhow::bail!("BYOK inference endpoints must use HTTPS (localhost is allowed for tests)");
-    }
-    Ok(())
 }
 
 fn redact_sensitive(text: &str) -> String {
