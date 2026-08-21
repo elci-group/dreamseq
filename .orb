@@ -1,0 +1,11 @@
+# .orb — declares this repository as ELCI tooling Orbweaver should
+# discover, probe, and (if installable) acquire on demand.
+# See orbweaver-connectors::orb for the format.
+version = 1
+
+[tool]
+binaries = ['dreamseq']
+
+[install]
+installable = true
+prefer_release_binary = true
