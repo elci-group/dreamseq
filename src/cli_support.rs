@@ -6,13 +6,14 @@ use dreamseq::color::Colorize;
 use dreamseq::present::{CompletionReport, HumanRenderer, JsonRenderer};
 use dreamseq::{Anthology, TrendAnalysis};
 
-pub(crate) async fn sync_if_paired(anthology: &Anthology) -> Result<()> {
+#[tracing::instrument(skip_all, fields(trace_id = %trace_id, anthology_id = %anthology.id))]
+pub(crate) async fn sync_if_paired(anthology: &Anthology, trace_id: &str) -> Result<()> {
     let store = CredentialStore::discover()?;
     let Some(credentials) = store.load_optional()? else {
         return Ok(());
     };
     CloudClient::new(Some(&credentials.api_url))?
-        .upload(&credentials, anthology)
+        .upload_with_trace_id(&credentials, anthology, trace_id)
         .await
 }
 
@@ -196,4 +197,77 @@ pub(crate) fn render_report(report: &CompletionReport, json: bool, verbose: bool
         println!("{}", HumanRenderer::from_env(verbose).render(report));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{Duration, Utc};
+    use dreamseq::DreamseqConfig;
+
+    fn write_anthology(directory: &std::path::Path, name: &str, anthology: &Anthology) {
+        std::fs::create_dir_all(directory).expect("anthology directory should be created");
+        std::fs::write(
+            directory.join(name),
+            serde_json::to_vec(anthology).expect("anthology should serialize"),
+        )
+        .expect("anthology fixture should write");
+    }
+
+    #[test]
+    fn relative_paths_stay_relative_only_when_inside_the_base() {
+        let base = std::path::Path::new("/workspace/project");
+        assert_eq!(
+            make_relative_to(std::path::Path::new("/workspace/project/src/lib.rs"), base),
+            std::path::PathBuf::from("src/lib.rs")
+        );
+        assert_eq!(
+            make_relative_to(std::path::Path::new("/outside/file"), base),
+            std::path::PathBuf::from("/outside/file")
+        );
+    }
+
+    #[test]
+    fn anthology_lookup_ignores_invalid_files_and_selects_the_newest() {
+        let root =
+            std::env::temp_dir().join(format!("dreamseq-cli-anthologies-{}", uuid::Uuid::new_v4()));
+        let mut older = Anthology::new(vec![], vec![], DreamseqConfig::default());
+        older.date = "2026-08-20".into();
+        older.generated_at = Utc::now() - Duration::hours(1);
+        let mut newer = older.clone();
+        newer.id = uuid::Uuid::new_v4().to_string();
+        newer.generated_at = Utc::now();
+        write_anthology(&root, "dreamseq-2026-08-20-old.json", &older);
+        write_anthology(&root, "dreamseq-2026-08-20-new.json", &newer);
+        std::fs::write(root.join("dreamseq-2026-08-20-broken.json"), b"not-json")
+            .expect("invalid fixture should write");
+        std::fs::write(root.join("ignored.txt"), b"not-json")
+            .expect("ignored fixture should write");
+
+        let path = find_anthology_for_date(&root, "2026-08-20")
+            .expect("date lookup should succeed")
+            .expect("matching anthology should exist");
+        assert!(path.ends_with("dreamseq-2026-08-20-new.json"));
+        let latest = find_latest_anthology(&root)
+            .expect("latest lookup should succeed")
+            .expect("latest anthology should exist");
+        assert_eq!(latest.id, newer.id);
+        std::fs::remove_dir_all(root).expect("fixture directory should be removable");
+    }
+
+    #[test]
+    fn anthology_lookup_handles_missing_directories() {
+        let missing =
+            std::env::temp_dir().join(format!("dreamseq-cli-missing-{}", uuid::Uuid::new_v4()));
+        assert!(
+            find_anthology_for_date(&missing, "2026-08-20")
+                .expect("missing directory should not error")
+                .is_none()
+        );
+        assert!(
+            find_latest_anthology(&missing)
+                .expect("missing directory should not error")
+                .is_none()
+        );
+    }
 }

@@ -333,6 +333,20 @@ impl Anthology {
 
         for pattern in &self.patterns {
             if pattern.impact_score > 0.6 {
+                let name = self.suggest_tool_name(&pattern.description);
+                // suggest_tool_name buckets by crude keyword match ("git" ->
+                // "git-assistant", etc.), so two patterns of different types
+                // (never merged by patterns::consolidate, which stays within
+                // a type) can still land on the same tool name. Without this
+                // guard the final report would show the same suggestion
+                // twice for genuinely distinct findings — exactly the
+                // redundancy consolidation is meant to prevent, just
+                // reintroduced downstream of it. Highest-impact pattern
+                // wins since patterns are already sorted by impact_score.
+                if self.candidate_tools.iter().any(|tool| tool.name == name) {
+                    continue;
+                }
+
                 tool_id += 1;
                 let priority = if pattern.impact_score > 0.8 {
                     Priority::High
@@ -342,7 +356,6 @@ impl Anthology {
                     Priority::Low
                 };
 
-                let name = self.suggest_tool_name(&pattern.description);
                 let existing_matches = self.find_existing_matches(&name);
                 let category = category_from_pattern_type(&pattern.pattern_type, &name);
                 let reason = if pattern.manifestation_count > 1 {

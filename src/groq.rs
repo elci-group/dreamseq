@@ -13,15 +13,23 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
+use tracing::Instrument as _;
 
 #[path = "inference_health.rs"]
 mod inference_health;
+#[path = "inference_normalization.rs"]
+mod inference_normalization;
 #[path = "inference_prompt.rs"]
 mod inference_prompt;
 #[path = "inference_providers.rs"]
 mod inference_providers;
 #[path = "inference_transport.rs"]
 mod inference_transport;
+
+use inference_normalization::{
+    coerce_analysis_scalars, normalize_analysis_items, normalize_analysis_json, redact_sensitive,
+    truncate,
+};
 
 const MAX_PROMPT_CHARS: usize = 48_000;
 // Each route already retries on the server (see call_inference_route's own
@@ -212,9 +220,7 @@ impl GroqClient {
 
     pub fn new_routed(api_key: &str, cloud: Option<Credentials>) -> Result<Self> {
         Ok(Self {
-            client: Client::builder()
-                .timeout(Duration::from_secs(90))
-                .build()?,
+            client: Client::builder().timeout(Duration::from_secs(90)).build()?,
             cloud,
             routes: inference_providers::configured_byok_routes(api_key)?,
             health: Arc::new(inference_health::RouteHealth::new()),
@@ -322,7 +328,18 @@ impl GroqClient {
         })
     }
 
+    // traci: allow -- compatibility wrapper creates and propagates a trace_id.
     pub async fn analyze(&self, segments: &[Segment]) -> Result<Analysis> {
+        let trace_id = crate::telemetry::new_trace_id();
+        self.analyze_with_trace_id(segments, &trace_id).await
+    }
+
+    #[tracing::instrument(skip_all, fields(trace_id = %trace_id, segments = segments.len()))]
+    pub async fn analyze_with_trace_id(
+        &self,
+        segments: &[Segment],
+        trace_id: &str,
+    ) -> Result<Analysis> {
         if segments.is_empty() {
             return Ok(Analysis::default());
         }
@@ -339,12 +356,31 @@ impl GroqClient {
             let permit = Arc::clone(&semaphore)
                 .acquire_owned()
                 .await
-                .expect("batch semaphore is never closed");
+                .map_err(|error| {
+                    tracing::error!(
+                        batch = index + 1,
+                        total_batches = total,
+                        error = %error,
+                        "failed to acquire inference batch permit"
+                    );
+                    anyhow::anyhow!("failed to acquire inference batch permit: {error}")
+                })?;
             let client = self.clone();
-            tasks.spawn(async move {
-                let _permit = permit;
-                (index, client.analyze_prompt(&prompt, index + 1, total).await)
-            });
+            let trace_id = trace_id.to_owned();
+            let span =
+                tracing::info_span!("inference_batch", batch = index + 1, total_batches = total);
+            tasks.spawn(
+                async move {
+                    let _permit = permit;
+                    (
+                        index,
+                        client
+                            .analyze_prompt(&prompt, index + 1, total, &trace_id)
+                            .await,
+                    )
+                }
+                .instrument(span),
+            );
         }
 
         let mut combined = Analysis::default();
@@ -418,7 +454,13 @@ impl GroqClient {
 
     const CLOUD_ROUTE: &'static str = "dreamsequence";
 
-    async fn analyze_prompt(&self, prompt: &str, batch: usize, total: usize) -> Result<Analysis> {
+    async fn analyze_prompt(
+        &self,
+        prompt: &str,
+        batch: usize,
+        total: usize,
+        trace_id: &str,
+    ) -> Result<Analysis> {
         let complexity = BatchComplexity::of(prompt);
         let messages = vec![
             Message {
@@ -434,9 +476,18 @@ impl GroqClient {
 
         if let Some(credentials) = &self.cloud {
             if self.health.is_circuit_open(Self::CLOUD_ROUTE) {
-                tracing::debug!(batch, route = Self::CLOUD_ROUTE, "skipping cloud route: circuit open");
+                tracing::debug!(
+                    batch,
+                    route = Self::CLOUD_ROUTE,
+                    "skipping cloud route: circuit open"
+                );
             } else if let Some(wait) = self.health.remaining_cooldown(Self::CLOUD_ROUTE) {
-                tracing::debug!(batch, route = Self::CLOUD_ROUTE, wait_ms = wait.as_millis(), "skipping cloud route: cooling down");
+                tracing::debug!(
+                    batch,
+                    route = Self::CLOUD_ROUTE,
+                    wait_ms = wait.as_millis(),
+                    "skipping cloud route: cooling down"
+                );
             } else {
                 crate::progress::stage(
                     "  ☁️",
@@ -449,7 +500,7 @@ impl GroqClient {
                     max_tokens: 4000,
                 };
                 self.health.record_attempt(Self::CLOUD_ROUTE);
-                match self.request_cloud(credentials, &request).await {
+                match self.request_cloud(credentials, &request, trace_id).await {
                     Ok(output) => match self.parse_analysis(&output.content) {
                         Ok(analysis) => {
                             self.health.record_success(Self::CLOUD_ROUTE);
@@ -486,9 +537,15 @@ impl GroqClient {
                 continue;
             }
             any_byok_attempted = true;
-            match self.attempt_route(&route, batch, total, &messages, complexity).await {
+            match self
+                .attempt_route(&route, batch, total, &messages, complexity, trace_id)
+                .await
+            {
                 Ok(analysis) => return Ok(analysis),
-                Err(error) => failures.push(error.to_string()),
+                Err(error) => {
+                    tracing::warn!(batch, route = %route.name, error = %error, "BYOK route attempt failed");
+                    failures.push(error.to_string());
+                }
             }
         }
 
@@ -502,7 +559,11 @@ impl GroqClient {
                 .routes
                 .iter()
                 .filter(|route| !self.health.is_circuit_open(&route.name))
-                .min_by_key(|route| self.health.remaining_cooldown(&route.name).unwrap_or(Duration::ZERO))
+                .min_by_key(|route| {
+                    self.health
+                        .remaining_cooldown(&route.name)
+                        .unwrap_or(Duration::ZERO)
+                })
         {
             let route = route.clone();
             if let Some(wait) = self.health.remaining_cooldown(&route.name) {
@@ -517,9 +578,15 @@ impl GroqClient {
                 tracing::warn!(batch, route = %route.name, wait_ms = wait.as_millis(), "every route is cooling down; waiting for the soonest to recover");
                 tokio::time::sleep(wait).await;
             }
-            match self.attempt_route(&route, batch, total, &messages, complexity).await {
+            match self
+                .attempt_route(&route, batch, total, &messages, complexity, trace_id)
+                .await
+            {
                 Ok(analysis) => return Ok(analysis),
-                Err(error) => failures.push(error.to_string()),
+                Err(error) => {
+                    tracing::warn!(batch, route = %route.name, error = %error, "recovered BYOK route attempt failed");
+                    failures.push(error.to_string());
+                }
             }
         }
 
@@ -552,10 +619,14 @@ impl GroqClient {
         total: usize,
         messages: &[Message],
         complexity: BatchComplexity,
+        trace_id: &str,
     ) -> Result<Analysis> {
         crate::progress::stage(
             "  🔀",
-            &format!("[batch {batch}/{total}] Trying BYOK route '{}'...", route.name),
+            &format!(
+                "[batch {batch}/{total}] Trying BYOK route '{}'...",
+                route.name
+            ),
         );
         // Bounds concurrent in-flight requests to this specific route,
         // independent of the global BATCH_CONCURRENCY cap — otherwise every
@@ -567,9 +638,23 @@ impl GroqClient {
             .route_semaphore(&route.name, ROUTE_CONCURRENCY)
             .acquire_owned()
             .await
-            .expect("route semaphore is never closed");
+            .map_err(|error| {
+                tracing::error!(
+                    batch,
+                    route = %route.name,
+                    error = %error,
+                    "failed to acquire inference route permit"
+                );
+                anyhow::anyhow!(
+                    "failed to acquire permit for route '{}': {error}",
+                    route.name
+                )
+            })?;
         let model = match complexity {
-            BatchComplexity::Light => route.light_model.clone().unwrap_or_else(|| route.model.clone()),
+            BatchComplexity::Light => route
+                .light_model
+                .clone()
+                .unwrap_or_else(|| route.model.clone()),
             BatchComplexity::Heavy => route.model.clone(),
         };
         let request = InferenceRequest {
@@ -580,8 +665,11 @@ impl GroqClient {
         };
         self.health.record_attempt(&route.name);
         let outcome = match route.protocol {
-            Protocol::OpenAiCompatible => self.request_openai_compatible(route, &request).await,
-            Protocol::Anthropic => self.request_anthropic(route, &request).await,
+            Protocol::OpenAiCompatible => {
+                self.request_openai_compatible(route, &request, trace_id)
+                    .await
+            }
+            Protocol::Anthropic => self.request_anthropic(route, &request, trace_id).await,
         };
         drop(permit);
         match outcome {
@@ -673,310 +761,5 @@ impl GroqClient {
     #[doc(hidden)]
     pub fn build_analysis_prompts_for_test(&self, segments: &[Segment]) -> Vec<String> {
         self.build_analysis_prompts(segments)
-    }
-}
-
-/// Keep a provider's useful text findings when it emits a shorthand array of
-/// strings instead of the public typed object schema. This is deliberately
-/// deterministic: it never invents evidence, and uses conservative defaults
-/// for metrics that were not supplied by the provider.
-fn normalize_analysis_items(value: &mut serde_json::Value) {
-    let Some(object) = value.as_object_mut() else {
-        return;
-    };
-    let schemas: &[(&str, &[(&str, serde_json::Value)])] = &[
-        (
-            "model_failures",
-            &[
-                ("model", serde_json::json!("unknown")),
-                ("issue", serde_json::json!("")),
-                ("frequency", serde_json::json!(1)),
-                ("example", serde_json::json!("")),
-            ],
-        ),
-        (
-            "harness_friction",
-            &[
-                ("harness", serde_json::json!("unknown")),
-                ("issue", serde_json::json!("")),
-                ("severity", serde_json::json!(0.5)),
-            ],
-        ),
-        (
-            "missing_tooling",
-            &[
-                ("tool_name", serde_json::json!("candidate-capability")),
-                ("purpose", serde_json::json!("")),
-                ("estimated_value", serde_json::json!(0.5)),
-            ],
-        ),
-        (
-            "workflow_bottlenecks",
-            &[
-                ("description", serde_json::json!("")),
-                ("frequency", serde_json::json!(1)),
-                ("time_impact_minutes", serde_json::json!(0.0)),
-            ],
-        ),
-        (
-            "repeated_commands",
-            &[
-                ("command", serde_json::json!("")),
-                ("frequency", serde_json::json!(1)),
-                ("context", serde_json::json!("")),
-            ],
-        ),
-        (
-            "repeated_prompts",
-            &[
-                ("prompt_pattern", serde_json::json!("")),
-                ("frequency", serde_json::json!(1)),
-                ("suggested_improvement", serde_json::json!("")),
-            ],
-        ),
-        (
-            "context_loss",
-            &[
-                ("description", serde_json::json!("")),
-                ("affected_segments", serde_json::json!([])),
-            ],
-        ),
-        (
-            "automation_opportunities",
-            &[
-                ("description", serde_json::json!("")),
-                ("estimated_time_saved", serde_json::json!(0.0)),
-                ("confidence", serde_json::json!(0.5)),
-            ],
-        ),
-    ];
-    for (key, fields) in schemas {
-        let Some(items) = object
-            .get_mut(*key)
-            .and_then(serde_json::Value::as_array_mut)
-        else {
-            continue;
-        };
-        for item in items.iter_mut() {
-            let Some(text) = item.as_str().map(str::trim).filter(|text| !text.is_empty()) else {
-                continue;
-            };
-            let mut normalized = serde_json::Map::new();
-            for (field, default) in *fields {
-                normalized.insert((*field).to_string(), default.clone());
-            }
-            let primary = match *key {
-                "model_failures" | "harness_friction" => "issue",
-                "missing_tooling" => "purpose",
-                "workflow_bottlenecks" | "context_loss" | "automation_opportunities" => {
-                    "description"
-                }
-                "repeated_commands" => "command",
-                "repeated_prompts" => "prompt_pattern",
-                _ => "description",
-            };
-            normalized.insert(
-                primary.to_string(),
-                serde_json::Value::String(text.to_string()),
-            );
-            *item = serde_json::Value::Object(normalized);
-        }
-    }
-}
-
-fn redact_sensitive(text: &str) -> String {
-    static ASSIGNMENT: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-        regex::Regex::new(
-            r#"(?i)((?:api[_-]?key|access[_-]?token|auth[_-]?token|secret|password|authorization)\s*[:=]\s*(?:bearer\s+)?)[^\s,;\"']+"#,
-        )
-        .unwrap_or_else(|error| invalid_builtin_regex("credential_assignment", error))
-    });
-    static JWT: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-        regex::Regex::new(r"\b[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b")
-            .unwrap_or_else(|error| invalid_builtin_regex("jwt", error))
-    });
-    static PROVIDER_TOKEN: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-        regex::Regex::new(
-            r"\b(?:AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9_-]{20,})\b",
-        )
-        .unwrap_or_else(|error| invalid_builtin_regex("provider_token", error))
-    });
-    static EMAIL: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-        regex::Regex::new(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
-            .unwrap_or_else(|error| invalid_builtin_regex("email", error))
-    });
-    static HOME_PATH: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-        regex::Regex::new(r"/(?:home|Users)/[^/\s]+")
-            .unwrap_or_else(|error| invalid_builtin_regex("home_path", error))
-    });
-
-    let redacted = ASSIGNMENT.replace_all(text, "${1}[REDACTED]");
-    let redacted = JWT.replace_all(&redacted, "[REDACTED_JWT]");
-    let redacted = PROVIDER_TOKEN.replace_all(&redacted, "[REDACTED_TOKEN]");
-    let redacted = EMAIL.replace_all(&redacted, "[REDACTED_EMAIL]");
-    HOME_PATH
-        .replace_all(&redacted, "/home/[REDACTED_USER]")
-        .into_owned()
-}
-
-fn invalid_builtin_regex(name: &'static str, error: regex::Error) -> ! {
-    tracing::error!(name, error = %error, "built-in redaction regex compilation failed");
-    std::panic::panic_any("invalid built-in redaction regex")
-}
-
-fn truncate(text: &str, max_chars: usize) -> String {
-    text.chars().take(max_chars).collect()
-}
-
-/// GPT OSS occasionally emits a number or boolean in a descriptive field.
-/// Preserve metric fields, but stringify scalar values where our public
-/// analysis schema intentionally uses human-readable text.
-fn coerce_analysis_scalars(value: &mut serde_json::Value) {
-    const TEXT_FIELDS: &[&str] = &[
-        "model",
-        "issue",
-        "example",
-        "harness",
-        "tool_name",
-        "purpose",
-        "description",
-        "command",
-        "context",
-        "prompt_pattern",
-        "suggested_improvement",
-    ];
-    const NUMERIC_FIELDS: &[&str] = &[
-        "frequency",
-        "severity",
-        "estimated_value",
-        "time_impact_minutes",
-        "estimated_time_saved",
-        "confidence",
-    ];
-
-    match value {
-        serde_json::Value::Object(object) => {
-            for (key, child) in object.iter_mut() {
-                if NUMERIC_FIELDS.contains(&key.as_str()) && child.is_string() {
-                    let number =
-                        parse_numeric_string(child.as_str().unwrap_or_default()).unwrap_or(0.0);
-                    *child = serde_json::json!(number);
-                } else if TEXT_FIELDS.contains(&key.as_str())
-                    && !child.is_string()
-                    && !child.is_null()
-                {
-                    let replacement = match &*child {
-                        serde_json::Value::Number(number) => number.to_string(),
-                        serde_json::Value::Bool(boolean) => boolean.to_string(),
-                        other => other.to_string(),
-                    };
-                    *child = serde_json::Value::String(replacement);
-                } else if key == "affected_segments" {
-                    if let serde_json::Value::Array(items) = child {
-                        for item in items {
-                            if !item.is_string() && !item.is_null() {
-                                *item = serde_json::Value::String(match &*item {
-                                    serde_json::Value::Number(number) => number.to_string(),
-                                    serde_json::Value::Bool(boolean) => boolean.to_string(),
-                                    other => other.to_string(),
-                                });
-                            }
-                        }
-                    }
-                } else {
-                    coerce_analysis_scalars(child);
-                }
-            }
-        }
-        serde_json::Value::Array(items) => {
-            for item in items {
-                coerce_analysis_scalars(item);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn normalize_analysis_json(input: &str) -> String {
-    static NUMERIC_VALUE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-        regex::Regex::new(
-                r#"(?i)(?:\"(frequency|severity|estimated_value|time_impact_minutes|estimated_time_saved|confidence)\"|(frequency|severity|estimated_value|time_impact_minutes|estimated_time_saved|confidence))\s*:\s*(?:\"[^\"]*\"|'[^']*'|[^,}\n]+)"#,
-            )
-            .unwrap_or_else(|error| invalid_builtin_regex("numeric_analysis_field", error))
-    });
-    NUMERIC_VALUE
-        .replace_all(input, |captures: &regex::Captures<'_>| {
-            let field = captures
-                .get(1)
-                .or_else(|| captures.get(2))
-                .map(|match_| match_.as_str())
-                .unwrap_or("frequency");
-            let full = captures
-                .get(0)
-                .map(|match_| match_.as_str())
-                .unwrap_or_default();
-            let raw_value = full
-                .split_once(':')
-                .map(|(_, value)| value)
-                .unwrap_or_default();
-            let number =
-                parse_numeric_string(raw_value.trim().trim_matches(['\"', '\''])).unwrap_or(0.0);
-            format!("\"{field}\":{number}")
-        })
-        .into_owned()
-}
-
-fn parse_numeric_string(value: &str) -> Option<f64> {
-    let normalized = value
-        .trim()
-        .to_ascii_lowercase()
-        .trim_end_matches("-plus")
-        .to_string();
-    if let Ok(number) = normalized.parse::<f64>() {
-        return Some(number);
-    }
-    // traci: allow -- parse failure is expected while identifying a leading numeric fragment.
-    let leading_digits = normalized
-        .split(|character: char| !character.is_ascii_digit() && character != '.')
-        .find(|part| !part.is_empty())
-        // traci: allow -- invalid fragments are expected while extracting a number from prose.
-        .and_then(|part| part.parse::<f64>().ok());
-    if leading_digits.is_some() {
-        return leading_digits;
-    }
-    let leading_word = normalized
-        .split(|character: char| !character.is_ascii_alphabetic())
-        .find(|part| !part.is_empty())
-        .unwrap_or_default();
-    match leading_word {
-        "zero" => Some(0.0),
-        "one" => Some(1.0),
-        "two" => Some(2.0),
-        "three" => Some(3.0),
-        "four" => Some(4.0),
-        "five" => Some(5.0),
-        "six" => Some(6.0),
-        "seven" => Some(7.0),
-        "eight" => Some(8.0),
-        "nine" => Some(9.0),
-        "ten" => Some(10.0),
-        "eleven" => Some(11.0),
-        "twelve" => Some(12.0),
-        "thirteen" => Some(13.0),
-        "fourteen" => Some(14.0),
-        "fifteen" => Some(15.0),
-        "sixteen" => Some(16.0),
-        "seventeen" => Some(17.0),
-        "eighteen" => Some(18.0),
-        "nineteen" => Some(19.0),
-        "twenty" => Some(20.0),
-        "thirty" => Some(30.0),
-        "forty" => Some(40.0),
-        "fifty" => Some(50.0),
-        "sixty" => Some(60.0),
-        "seventy" => Some(70.0),
-        "eighty" => Some(80.0),
-        "ninety" => Some(90.0),
-        _ => None,
     }
 }

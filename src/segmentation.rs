@@ -126,4 +126,3 @@ impl SemanticSegmenter {
         similarities.iter().sum::<f64>() / similarities.len() as f64
     }
 }
-

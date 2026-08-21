@@ -1,24 +1,30 @@
 // Copyright (c) 2026 Dreamsequence Ltd
 // SPDX-License-Identifier: MIT
 use crate::goblin_gateway::{GatewayDecision, validate_run_envelope};
-use crate::report::{Anthology, CandidateTool, Priority};
-use anyhow::{Context, Result};
+use crate::report::Anthology;
+use anyhow::Result;
 use chrono::{DateTime, Utc};
 use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
-use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 use std::time::Duration;
-use walkdir::WalkDir;
 
 #[path = "cloud_credentials.rs"]
 mod cloud_credentials;
+#[path = "cloud_envelope.rs"]
+mod cloud_envelope;
+#[path = "cloud_protocol.rs"]
+mod cloud_protocol;
+#[path = "cloud_sync.rs"]
+mod cloud_sync;
+pub use cloud_envelope::RunEnvelope;
+pub use cloud_protocol::DeviceAuthorization;
+use cloud_protocol::{DevicePoll, DeviceToken, parse_response};
+pub use cloud_sync::SyncSummary;
 
 const LEGACY_API_URL: &str = "https://dreamsequence.pro";
 const DEFAULT_API_URL: &str = "https://padagonia.dreamsequence.pro/dreamsequence";
-const SCHEMA_VERSION: u8 = 1;
-const MAX_API_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Credentials {
@@ -68,136 +74,6 @@ impl CredentialStore {
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct DeviceAuthorization {
-    device_code: String,
-    user_code: String,
-    verification_uri: String,
-    verification_uri_complete: String,
-    expires_in: u64,
-    interval: u64,
-}
-
-#[derive(Serialize)]
-struct DevicePoll<'a> {
-    device_code: &'a str,
-}
-
-#[derive(Debug, Deserialize)]
-struct DeviceToken {
-    access_token: String,
-    account_id: String,
-    device_id: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct ApiError {
-    error: Option<String>,
-    message: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct RunEnvelope {
-    schema_version: u8,
-    run: CloudRun,
-}
-
-#[derive(Debug, Serialize)]
-struct CloudRun {
-    id: String,
-    generated_at: DateTime<Utc>,
-    source: CloudSource,
-    summary: String,
-    pipeline: CloudPipeline,
-    opportunities: Vec<CloudOpportunity>,
-}
-
-#[derive(Debug, Serialize)]
-struct CloudSource {
-    id: String,
-    cli_version: &'static str,
-}
-
-#[derive(Debug, Serialize)]
-struct CloudPipeline {
-    raw_entries: usize,
-    normalized_entries: usize,
-    segments: usize,
-    estimated_input_tokens: usize,
-}
-
-#[derive(Debug, Serialize)]
-struct CloudOpportunity {
-    id: String,
-    title: String,
-    summary: String,
-    priority: &'static str,
-    confidence: u8,
-    estimated_hours: f64,
-    evidence_count: usize,
-    repositories: usize,
-    projects: Vec<String>,
-    decision: &'static str,
-}
-
-impl RunEnvelope {
-    pub fn from_anthology(anthology: &Anthology, source_id: &str) -> Self {
-        Self {
-            schema_version: SCHEMA_VERSION,
-            run: CloudRun {
-                id: anthology.id.clone(),
-                generated_at: anthology.generated_at,
-                source: CloudSource {
-                    id: source_id.to_string(),
-                    cli_version: env!("CARGO_PKG_VERSION"),
-                },
-                summary: anthology.executive_summary.clone(),
-                pipeline: CloudPipeline {
-                    raw_entries: anthology.pipeline.raw_entries,
-                    normalized_entries: anthology.pipeline.normalized_entries,
-                    segments: anthology.pipeline.segments,
-                    estimated_input_tokens: anthology.pipeline.estimated_input_tokens,
-                },
-                opportunities: anthology
-                    .candidate_tools
-                    .iter()
-                    .map(CloudOpportunity::from)
-                    .collect(),
-            },
-        }
-    }
-}
-
-impl From<&CandidateTool> for CloudOpportunity {
-    fn from(tool: &CandidateTool) -> Self {
-        let projects = if tool.existing_matches.is_empty() {
-            tool.affected_projects.clone()
-        } else {
-            tool.existing_matches.clone()
-        };
-        Self {
-            id: tool.id.clone(),
-            title: tool.name.clone(),
-            summary: tool.reason.clone(),
-            priority: match tool.priority {
-                Priority::High => "high",
-                Priority::Medium => "medium",
-                Priority::Low => "low",
-            },
-            confidence: (tool.confidence.clamp(0.0, 1.0) * 100.0).round() as u8,
-            estimated_hours: parse_hours(&tool.estimated_time_saved),
-            evidence_count: 1,
-            repositories: projects.len(),
-            projects,
-            decision: if tool.existing_matches.is_empty() {
-                "generate"
-            } else {
-                "extend"
-            },
-        }
-    }
-}
-
 pub struct CloudClient {
     base_url: String,
     http: Client,
@@ -220,23 +96,54 @@ impl CloudClient {
         Ok(Self { base_url, http })
     }
 
-    pub async fn pair(&self, store: &CredentialStore, open: bool) -> Result<Credentials> {
+    /// Start a device-authorization flow and return the verification payload
+    /// without printing or opening a browser.
+    // traci: allow -- compatibility wrapper creates and propagates a trace_id.
+    pub async fn request_authorization(&self) -> Result<DeviceAuthorization> {
+        let trace_id = crate::telemetry::new_trace_id();
+        self.request_authorization_with_trace_id(&trace_id).await
+    }
+
+    #[tracing::instrument(skip_all, fields(trace_id = %trace_id))]
+    pub async fn request_authorization_with_trace_id(
+        &self,
+        trace_id: &str,
+    ) -> Result<DeviceAuthorization> {
         let response = self
             .http
             .post(format!("{}/api/v1/device/authorize", self.base_url))
             .json(&serde_json::json!({ "client": "dreamseq-cli" }))
             .send()
             .await?;
-        let authorization: DeviceAuthorization = parse_response(response).await?;
+        parse_response(response, trace_id).await
+    }
 
-        println!("Open {}", authorization.verification_uri);
-        println!("Enter code: {}", authorization.user_code);
-        if open && !open_browser(&authorization.verification_uri_complete) {
-            eprintln!("Could not open a browser automatically. Use the URL above.");
-        }
+    /// Poll the device-token endpoint until the user approves the request or
+    /// the deadline expires.
+    // traci: allow -- compatibility wrapper creates and propagates a trace_id.
+    pub async fn poll_token(
+        &self,
+        device_code: &str,
+        expires_in: u64,
+        interval: u64,
+        store: &CredentialStore,
+    ) -> Result<Credentials> {
+        let trace_id = crate::telemetry::new_trace_id();
+        self.poll_token_with_trace_id(device_code, expires_in, interval, store, &trace_id)
+            .await
+    }
 
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(authorization.expires_in);
-        let interval = Duration::from_secs(authorization.interval.max(2));
+    #[tracing::instrument(skip_all, fields(trace_id = %trace_id))]
+    pub async fn poll_token_with_trace_id(
+        &self,
+        device_code: &str,
+        expires_in: u64,
+        interval: u64,
+        store: &CredentialStore,
+        trace_id: &str,
+    ) -> Result<Credentials> {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(expires_in);
+        let interval = Duration::from_secs(interval.max(2));
         loop {
             if tokio::time::Instant::now() >= deadline {
                 anyhow::bail!("device code expired; run `dreamseq login` again");
@@ -245,9 +152,7 @@ impl CloudClient {
             let response = self
                 .http
                 .post(format!("{}/api/v1/device/token", self.base_url))
-                .json(&DevicePoll {
-                    device_code: &authorization.device_code,
-                })
+                .json(&DevicePoll { device_code })
                 .send()
                 .await?;
             if response.status() == StatusCode::ACCEPTED {
@@ -257,7 +162,7 @@ impl CloudClient {
                 tokio::time::sleep(interval).await;
                 continue;
             }
-            let token: DeviceToken = parse_response(response).await?;
+            let token: DeviceToken = parse_response(response, trace_id).await?;
             let credentials = Credentials {
                 api_url: self.base_url.clone(),
                 access_token: token.access_token,
@@ -270,18 +175,73 @@ impl CloudClient {
         }
     }
 
+    // traci: allow -- compatibility wrapper creates and propagates a trace_id.
+    pub async fn pair(&self, store: &CredentialStore, open: bool) -> Result<Credentials> {
+        let trace_id = crate::telemetry::new_trace_id();
+        self.pair_with_trace_id(store, open, &trace_id).await
+    }
+
+    #[tracing::instrument(skip_all, fields(trace_id = %trace_id))]
+    pub async fn pair_with_trace_id(
+        &self,
+        store: &CredentialStore,
+        open: bool,
+        trace_id: &str,
+    ) -> Result<Credentials> {
+        let authorization = self.request_authorization_with_trace_id(trace_id).await?;
+
+        println!("Open {}", authorization.verification_uri);
+        println!("Enter code: {}", authorization.user_code);
+        if open && !open_browser(&authorization.verification_uri_complete) {
+            eprintln!("Could not open a browser automatically. Use the URL above.");
+        }
+
+        self.poll_token_with_trace_id(
+            &authorization.device_code,
+            authorization.expires_in,
+            authorization.interval,
+            store,
+            trace_id,
+        )
+        .await
+    }
+
+    // traci: allow -- compatibility wrapper creates and propagates a trace_id.
     pub async fn revoke(&self, credentials: &Credentials) -> Result<()> {
+        let trace_id = crate::telemetry::new_trace_id();
+        self.revoke_with_trace_id(credentials, &trace_id).await
+    }
+
+    #[tracing::instrument(skip_all, fields(trace_id = %trace_id))]
+    pub async fn revoke_with_trace_id(
+        &self,
+        credentials: &Credentials,
+        trace_id: &str,
+    ) -> Result<()> {
         let response = self
             .http
             .post(format!("{}/api/v1/device/logout", self.base_url))
             .bearer_auth(&credentials.access_token)
             .send()
             .await?;
-        let _: serde_json::Value = parse_response(response).await?;
+        let _: serde_json::Value = parse_response(response, trace_id).await?;
         Ok(())
     }
 
+    // traci: allow -- compatibility wrapper creates and propagates a trace_id.
     pub async fn upload(&self, credentials: &Credentials, anthology: &Anthology) -> Result<()> {
+        let trace_id = crate::telemetry::new_trace_id();
+        self.upload_with_trace_id(credentials, anthology, &trace_id)
+            .await
+    }
+
+    #[tracing::instrument(skip_all, fields(trace_id = %trace_id, anthology_id = %anthology.id))]
+    pub async fn upload_with_trace_id(
+        &self,
+        credentials: &Credentials,
+        anthology: &Anthology,
+        trace_id: &str,
+    ) -> Result<()> {
         let envelope = RunEnvelope::from_anthology(anthology, &credentials.device_id);
         let envelope_value = serde_json::to_value(&envelope)?;
         let decision = validate_run_envelope(&envelope_value, 0.90);
@@ -298,95 +258,9 @@ impl CloudClient {
             .json(&envelope)
             .send()
             .await?;
-        let _: serde_json::Value = parse_response(response).await?;
+        let _: serde_json::Value = parse_response(response, trace_id).await?;
         Ok(())
     }
-
-    pub async fn sync_directories(
-        &self,
-        credentials: &Credentials,
-        directories: &[PathBuf],
-    ) -> Result<SyncSummary> {
-        let mut summary = SyncSummary::default();
-        for directory in directories {
-            if !directory.exists() {
-                continue;
-            }
-            for entry in WalkDir::new(directory).follow_links(false) {
-                let entry = match entry {
-                    Ok(entry) if entry.file_type().is_file() => entry,
-                    Ok(_) => continue,
-                    Err(error) => {
-                        summary.failed += 1;
-                        tracing::warn!(error = %error, "could not inspect sync directory entry");
-                        continue;
-                    }
-                };
-                if entry.path().extension().and_then(|value| value.to_str()) != Some("json") {
-                    continue;
-                }
-                let content = match fs::read(entry.path()) {
-                    Ok(content) => content,
-                    Err(error) => {
-                        summary.failed += 1;
-                        tracing::warn!(path = %entry.path().display(), error = %error, "could not read sync candidate");
-                        continue;
-                    }
-                };
-                let anthology = match serde_json::from_slice::<Anthology>(&content) {
-                    Ok(anthology) => anthology,
-                    Err(_) => {
-                        summary.skipped += 1;
-                        continue;
-                    }
-                };
-                match self.upload(credentials, &anthology).await {
-                    Ok(()) => summary.uploaded += 1,
-                    Err(error) => {
-                        summary.failed += 1;
-                        tracing::warn!(path = %entry.path().display(), error = %error, "could not upload anthology");
-                    }
-                }
-            }
-        }
-        Ok(summary)
-    }
-}
-
-#[derive(Debug, Default, Serialize)]
-pub struct SyncSummary {
-    pub uploaded: usize,
-    pub skipped: usize,
-    pub failed: usize,
-}
-
-async fn parse_response<T: for<'de> Deserialize<'de>>(response: reqwest::Response) -> Result<T> {
-    let status = response.status();
-    if response
-        .content_length()
-        .is_some_and(|length| length > MAX_API_RESPONSE_BYTES as u64)
-    {
-        anyhow::bail!("Dreamsequence API response exceeds the 4 MiB limit");
-    }
-    let bytes = response.bytes().await?;
-    if bytes.len() > MAX_API_RESPONSE_BYTES {
-        anyhow::bail!("Dreamsequence API response exceeds the 4 MiB limit");
-    }
-    if !status.is_success() {
-        let error = serde_json::from_slice::<ApiError>(&bytes).unwrap_or(ApiError {
-            error: None,
-            message: None,
-        });
-        anyhow::bail!(
-            "Dreamsequence API returned {}: {}",
-            status,
-            error
-                .message
-                .or(error.error)
-                .unwrap_or_else(|| "request failed".to_string())
-        );
-    }
-    serde_json::from_slice(&bytes).context("Dreamsequence API returned invalid JSON")
 }
 
 fn normalize_api_url(value: String) -> Result<String> {
@@ -404,18 +278,6 @@ pub(crate) fn effective_api_url(value: &str) -> &str {
     } else {
         value
     }
-}
-
-fn parse_hours(value: &str) -> f64 {
-    value
-        .split(|character: char| !(character.is_ascii_digit() || character == '.'))
-        .find_map(|part| {
-            (!part.is_empty())
-                // traci: allow -- non-numeric fragments are expected while scanning prose.
-                .then(|| part.parse::<f64>().ok())
-                .flatten()
-        })
-        .unwrap_or(0.0)
 }
 
 fn open_browser(url: &str) -> bool {
@@ -439,7 +301,44 @@ fn open_browser(url: &str) -> bool {
 mod tests {
     use super::*;
     use crate::config::DreamseqConfig;
+    use crate::report::{CandidateTool, Priority};
     use crate::report::{InterventionCategory, PipelineStats};
+    use std::fs;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    async fn test_server(
+        responses: Vec<(&'static str, &'static str)>,
+    ) -> (String, tokio::task::JoinHandle<Vec<String>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let task = tokio::spawn(async move {
+            let mut requests = Vec::new();
+            for (status, body) in responses {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut buffer = vec![0_u8; 32 * 1024];
+                let read = socket.read(&mut buffer).await.unwrap();
+                requests.push(String::from_utf8_lossy(&buffer[..read]).into_owned());
+                let response = format!(
+                    "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                socket.write_all(response.as_bytes()).await.unwrap();
+            }
+            requests
+        });
+        (format!("http://{address}"), task)
+    }
+
+    fn test_credentials(api_url: String) -> Credentials {
+        Credentials {
+            api_url,
+            access_token: "ds_test_token".into(),
+            account_id: "account_1".into(),
+            device_id: "device_1".into(),
+            paired_at: Utc::now(),
+        }
+    }
 
     #[test]
     fn credentials_are_private_and_removable() {
@@ -480,6 +379,7 @@ mod tests {
             normalized_entries: 10,
             segments: 3,
             estimated_input_tokens: 800,
+            remote_analysis_consent: Some(crate::RemoteAnalysisConsent::PreConfigured),
         };
         anthology.executive_summary = "Useful aggregate summary".into();
         anthology.candidate_tools.push(CandidateTool {
@@ -533,7 +433,115 @@ mod tests {
 
     #[test]
     fn estimated_hours_are_projected() {
-        assert_eq!(parse_hours("14.7 hours/week"), 14.7);
-        assert_eq!(parse_hours("unknown"), 0.0);
+        assert_eq!(cloud_envelope::parse_hours("14.7 hours/week"), 14.7);
+        assert_eq!(cloud_envelope::parse_hours("unknown"), 0.0);
+    }
+
+    #[tokio::test]
+    async fn authorization_posts_the_device_contract() {
+        let body = r#"{
+            "device_code":"device-code",
+            "user_code":"ABCD-EFGH",
+            "verification_uri":"https://example.com/device",
+            "verification_uri_complete":"https://example.com/device?code=ABCD-EFGH",
+            "expires_in":600,
+            "interval":5
+        }"#;
+        let (base_url, server) = test_server(vec![("200 OK", body)]).await;
+        let authorization = CloudClient::new(Some(&base_url))
+            .unwrap()
+            .request_authorization()
+            .await
+            .unwrap();
+        let requests = server.await.unwrap();
+
+        assert_eq!(authorization.user_code, "ABCD-EFGH");
+        assert!(requests[0].starts_with("POST /api/v1/device/authorize HTTP/1.1"));
+        assert!(requests[0].contains("dreamseq-cli"));
+    }
+
+    #[tokio::test]
+    async fn authorization_surfaces_api_and_json_failures() {
+        let (base_url, server) = test_server(vec![
+            (
+                "401 Unauthorized",
+                r#"{"error":"invalid_client","message":"Client is not registered"}"#,
+            ),
+            ("200 OK", "not-json"),
+        ])
+        .await;
+        let client = CloudClient::new(Some(&base_url)).unwrap();
+
+        let api_error = client.request_authorization().await.unwrap_err();
+        assert!(api_error.to_string().contains("Client is not registered"));
+        let json_error = client.request_authorization().await.unwrap_err();
+        assert!(json_error.to_string().contains("invalid JSON"));
+        assert_eq!(server.await.unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn sync_counts_uploaded_skipped_missing_and_failed_inputs() {
+        let root =
+            std::env::temp_dir().join(format!("dreamseq-cloud-sync-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let anthology = Anthology::new(vec![], vec![], DreamseqConfig::default());
+        fs::write(
+            root.join("anthology.json"),
+            serde_json::to_vec(&anthology).unwrap(),
+        )
+        .unwrap();
+        fs::write(root.join("other.json"), br#"{"kind":"other"}"#).unwrap();
+        fs::write(root.join("notes.txt"), b"ignored").unwrap();
+
+        let (base_url, server) = test_server(vec![("200 OK", r#"{"ok":true}"#)]).await;
+        let client = CloudClient::new(Some(&base_url)).unwrap();
+        let credentials = test_credentials(base_url);
+        let summary = client
+            .sync_directories(&credentials, &[root.clone(), root.join("missing")])
+            .await
+            .unwrap();
+        let requests = server.await.unwrap();
+
+        assert_eq!(
+            summary,
+            SyncSummary {
+                uploaded: 1,
+                skipped: 1,
+                failed: 0,
+            }
+        );
+        assert!(requests[0].starts_with("POST /api/v1/runs HTTP/1.1"));
+        assert!(requests[0].contains("authorization: Bearer ds_test_token"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn sync_records_upload_failures_without_aborting_the_scan() {
+        let root =
+            std::env::temp_dir().join(format!("dreamseq-cloud-fail-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let anthology = Anthology::new(vec![], vec![], DreamseqConfig::default());
+        fs::write(
+            root.join("run.json"),
+            serde_json::to_vec(&anthology).unwrap(),
+        )
+        .unwrap();
+
+        let (base_url, server) = test_server(vec![(
+            "503 Service Unavailable",
+            r#"{"message":"maintenance"}"#,
+        )])
+        .await;
+        let client = CloudClient::new(Some(&base_url)).unwrap();
+        let credentials = test_credentials(base_url);
+        let summary = client
+            .sync_directories(&credentials, std::slice::from_ref(&root))
+            .await
+            .unwrap();
+
+        assert_eq!(summary.failed, 1);
+        assert_eq!(summary.uploaded, 0);
+        assert_eq!(server.await.unwrap().len(), 1);
+        fs::remove_dir_all(root).unwrap();
     }
 }

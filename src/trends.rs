@@ -52,14 +52,40 @@ impl TrendAnalyzer {
         Self { anthologies_dir }
     }
 
+    // traci: allow -- compatibility wrapper creates and propagates a trace_id.
     pub async fn analyze(&self, current_anthology: &Anthology) -> Result<TrendAnalysis> {
-        self.analyze_for_days(current_anthology, 30).await
+        let trace_id = crate::telemetry::new_trace_id();
+        self.analyze_with_trace_id(current_anthology, &trace_id)
+            .await
     }
 
+    #[tracing::instrument(skip_all, fields(trace_id = %trace_id, anthology_id = %current_anthology.id))]
+    pub async fn analyze_with_trace_id(
+        &self,
+        current_anthology: &Anthology,
+        trace_id: &str,
+    ) -> Result<TrendAnalysis> {
+        self.analyze_for_days_with_trace_id(current_anthology, 30, trace_id)
+            .await
+    }
+
+    // traci: allow -- compatibility wrapper creates and propagates a trace_id.
     pub async fn analyze_for_days(
         &self,
         current_anthology: &Anthology,
         days: i64,
+    ) -> Result<TrendAnalysis> {
+        let trace_id = crate::telemetry::new_trace_id();
+        self.analyze_for_days_with_trace_id(current_anthology, days, &trace_id)
+            .await
+    }
+
+    #[tracing::instrument(skip_all, fields(trace_id = %trace_id, anthology_id = %current_anthology.id, days))]
+    pub async fn analyze_for_days_with_trace_id(
+        &self,
+        current_anthology: &Anthology,
+        days: i64,
+        trace_id: &str,
     ) -> Result<TrendAnalysis> {
         let previous_anthologies =
             self.load_previous_anthologies(days.max(1), &current_anthology.id)?;

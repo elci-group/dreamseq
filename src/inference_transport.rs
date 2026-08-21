@@ -31,10 +31,12 @@ impl std::fmt::Display for InferenceError {
 impl std::error::Error for InferenceError {}
 
 impl GroqClient {
+    #[tracing::instrument(skip_all, fields(trace_id = %trace_id, provider = "dreamsequence"))]
     pub(super) async fn request_cloud(
         &self,
         credentials: &Credentials,
         request: &InferenceRequest,
+        trace_id: &str,
     ) -> Result<InferenceOutput> {
         for attempt in 1..=MAX_ATTEMPTS {
             let response = self
@@ -62,11 +64,12 @@ impl GroqClient {
                     let retryable = retryable_status(status);
                     let message = super::truncate(&response.text().await.unwrap_or_default(), 300);
                     if !retryable || attempt == MAX_ATTEMPTS {
-                        return Err(InferenceError {
+                        let failure = InferenceError {
                             status: Some(status.as_u16()),
                             message,
-                        }
-                        .into());
+                        };
+                        tracing::error!(status = status.as_u16(), "cloud inference request failed");
+                        return Err(failure.into());
                     }
                 }
                 Err(error) if attempt == MAX_ATTEMPTS => return Err(error.into()),
@@ -76,17 +79,22 @@ impl GroqClient {
             }
             crate::progress::stage(
                 "  ⏳",
-                &format!("Retrying Dreamsequence cloud inference (attempt {}/{MAX_ATTEMPTS})...", attempt + 1),
+                &format!(
+                    "Retrying Dreamsequence cloud inference (attempt {}/{MAX_ATTEMPTS})...",
+                    attempt + 1
+                ),
             );
             tokio::time::sleep(backoff(attempt)).await;
         }
         anyhow::bail!("cloud inference exhausted retry attempts")
     }
 
+    #[tracing::instrument(skip_all, fields(trace_id = %trace_id, provider = %route.name))]
     pub(super) async fn request_openai_compatible(
         &self,
         route: &InferenceRoute,
         request: &InferenceRequest,
+        trace_id: &str,
     ) -> Result<InferenceOutput> {
         for attempt in 1..=MAX_ATTEMPTS {
             let response = self
@@ -116,11 +124,12 @@ impl GroqClient {
                     let retryable = retryable_status(status);
                     let message = super::truncate(&response.text().await.unwrap_or_default(), 300);
                     if !retryable || attempt == MAX_ATTEMPTS {
-                        return Err(InferenceError {
+                        let failure = InferenceError {
                             status: Some(status.as_u16()),
                             message,
-                        }
-                        .into());
+                        };
+                        tracing::error!(status = status.as_u16(), provider = %route.name, "inference request failed");
+                        return Err(failure.into());
                     }
                 }
                 Err(error) if attempt == MAX_ATTEMPTS => return Err(error.into()),
@@ -130,7 +139,11 @@ impl GroqClient {
             }
             crate::progress::stage(
                 "  ⏳",
-                &format!("Retrying '{}' (attempt {}/{MAX_ATTEMPTS})...", route.name, attempt + 1),
+                &format!(
+                    "Retrying '{}' (attempt {}/{MAX_ATTEMPTS})...",
+                    route.name,
+                    attempt + 1
+                ),
             );
             tokio::time::sleep(backoff(attempt)).await;
         }
@@ -141,10 +154,12 @@ impl GroqClient {
     /// a bearer token, `/v1/messages` instead of `/chat/completions`, a
     /// top-level `system` field instead of a `system`-role message, and a
     /// typed content-block array in the response instead of `choices`.
+    #[tracing::instrument(skip_all, fields(trace_id = %trace_id, provider = %route.name))]
     pub(super) async fn request_anthropic(
         &self,
         route: &InferenceRoute,
         request: &InferenceRequest,
+        trace_id: &str,
     ) -> Result<InferenceOutput> {
         let system = request
             .messages
@@ -201,11 +216,12 @@ impl GroqClient {
                     let retryable = retryable_status(status);
                     let message = super::truncate(&response.text().await.unwrap_or_default(), 300);
                     if !retryable || attempt == MAX_ATTEMPTS {
-                        return Err(InferenceError {
+                        let failure = InferenceError {
                             status: Some(status.as_u16()),
                             message,
-                        }
-                        .into());
+                        };
+                        tracing::error!(status = status.as_u16(), provider = %route.name, "inference request failed");
+                        return Err(failure.into());
                     }
                 }
                 Err(error) if attempt == MAX_ATTEMPTS => return Err(error.into()),
@@ -215,7 +231,11 @@ impl GroqClient {
             }
             crate::progress::stage(
                 "  ⏳",
-                &format!("Retrying '{}' (attempt {}/{MAX_ATTEMPTS})...", route.name, attempt + 1),
+                &format!(
+                    "Retrying '{}' (attempt {}/{MAX_ATTEMPTS})...",
+                    route.name,
+                    attempt + 1
+                ),
             );
             tokio::time::sleep(backoff(attempt)).await;
         }

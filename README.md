@@ -190,7 +190,8 @@ Dreamseq uses a JSON configuration file at `~/.config/dreamseq/config.json` (leg
   "anthologies_dir": "/home/user/dreamseq/anthologies",
   "enable_tts": false,
   "enable_kaptaind": false,
-  "allow_remote_analysis": false
+  "allow_remote_analysis": false,
+  "auto_approve_remote_analysis": false
 }
 ```
 
@@ -212,6 +213,7 @@ Dreamseq uses a JSON configuration file at `~/.config/dreamseq/config.json` (leg
 | `enable_tts` | ✅ Yes | Enable text-to-speech notifications. |
 | `enable_kaptaind` | ✅ Yes | Opt in to Kaptaind status and analysis integration. Defaults to `false` because external analyzers may write project metadata. |
 | `allow_remote_analysis` | ✅ Yes | Explicit consent to send redacted excerpts to Dreamsequence or configured BYOK endpoints. Defaults to `false`. |
+| `auto_approve_remote_analysis` | ✅ Yes | When `true` and `allow_remote_analysis` is `false`, automatically grant one-time consent instead of prompting. Defaults to `false`; use only after reviewing the privacy implications. |
 
 ---
 
@@ -406,7 +408,7 @@ cargo clippy
 | Legal & CI | Added MIT `LICENSE` and GitHub Actions CI workflow. |
 | Normalization fix | Preserved repeated-event evidence while removing empty entries. |
 | Steering detector | Compiles regexes once and uses tighter patterns to avoid false positives on telemetry noise. |
-| Test coverage | Expanded from 13 to 31 tests, replacing tautological assertions with real checks and adding a mocked Groq endpoint test. |
+| Test coverage | More than 100 Rust tests plus mobile frontend tests, with a measured 70% Rust line-coverage floor enforced in CI. |
 | Integration test | Added deterministic end-to-end integration test using fixture log data and a local mock Groq server. |
 | Dependency cleanup | Removed unused `config` and `thiserror` dependencies. |
 | Log parsing improvements | JSON logs now extract `tool_calls`, `model`, and numeric or string timestamps; harness-specific field fallbacks (`ts`, `text`, `body`, `msg`); plain/Markdown timestamp extraction; graceful Codex SQLite skip. |
@@ -419,6 +421,46 @@ cargo clippy
 |---|---|
 | Embedding-based segmentation | Richer semantic grouping beyond TF-IDF cosine. |
 | Dedicated harness parsers | Handle proprietary or binary formats that generic parsers cannot manage. |
+
+---
+
+## 📱 Mobile app
+
+Dreamseq Mobile is a cross-platform iOS/Android app built with [Tauri 2.0](https://v2.tauri.app/). It runs the same Dreamseq pipeline as the desktop CLI on logs stored on the device, and syncs anthologies through the paired Dreamsequence cloud account.
+
+### Prerequisites
+
+- [Rust](https://rustup.rs/)
+- [Node.js](https://nodejs.org/) (LTS)
+- [Tauri CLI prerequisites for mobile](https://v2.tauri.app/start/prerequisites/)
+  - Android: Android Studio + NDK
+  - iOS: Xcode (macOS only)
+
+### Development
+
+```bash
+# Android
+bash scripts/mobile-dev.sh android
+
+# iOS (macOS only)
+bash scripts/mobile-dev.sh ios
+```
+
+### Build release artifacts
+
+```bash
+# Android APK/AAB
+bash scripts/mobile-build.sh android
+
+# iOS archive (macOS only)
+bash scripts/mobile-build.sh ios
+```
+
+### Mobile-specific notes
+
+- On-device logs are read from the app sandbox under its Documents/logs directory, organized by format (`mobile-json`, `mobile-plain`, `mobile-markdown`).
+- Remote LLM analysis is opt-in (`allow_remote_analysis`) and uses the same cloud/BYOK routing as the CLI.
+- Pairing uses the same Dreamsequence device-code flow as `dreamseq login`; the mobile app opens the browser for approval and polls for the token.
 
 ---
 

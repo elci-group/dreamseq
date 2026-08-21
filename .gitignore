@@ -21,3 +21,9 @@ __pycache__/
 
 # Local/runtime metadata
 .toon
+
+# Mobile app
+/mobile/node_modules
+/mobile/dist
+/mobile/src-tauri/gen
+/mobile/src-tauri/target

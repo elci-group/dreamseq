@@ -45,7 +45,18 @@ impl BoundClient {
     ///
     /// Missing Bound installations are returned as contextual errors so the
     /// ingestion report can account for the rejected source.
+    // traci: allow -- compatibility wrapper creates and propagates a trace_id.
     pub async fn aggregate(&self, harness: &HarnessConfig) -> Result<Vec<LogEntry>> {
+        let trace_id = crate::telemetry::new_trace_id();
+        self.aggregate_with_trace_id(harness, &trace_id).await
+    }
+
+    #[tracing::instrument(skip_all, fields(trace_id = %trace_id, harness = %harness.name))]
+    pub async fn aggregate_with_trace_id(
+        &self,
+        harness: &HarnessConfig,
+        trace_id: &str,
+    ) -> Result<Vec<LogEntry>> {
         let binary = std::env::var("BOUND_BINARY").unwrap_or_else(|_| "bound".to_string());
 
         if std::process::Command::new(&binary)
@@ -140,6 +151,18 @@ impl BoundClient {
 
 /// Convenience helper used by the main aggregator when it sees a
 /// `LogFormat::Bound` harness.
+// traci: allow -- compatibility wrapper creates and propagates a trace_id.
 pub async fn aggregate_bound_harness(harness: &HarnessConfig) -> Result<Vec<LogEntry>> {
-    BoundClient::new().aggregate(harness).await
+    let trace_id = crate::telemetry::new_trace_id();
+    aggregate_bound_harness_with_trace_id(harness, &trace_id).await
+}
+
+#[tracing::instrument(skip_all, fields(trace_id = %trace_id, harness = %harness.name))]
+pub async fn aggregate_bound_harness_with_trace_id(
+    harness: &HarnessConfig,
+    trace_id: &str,
+) -> Result<Vec<LogEntry>> {
+    BoundClient::new()
+        .aggregate_with_trace_id(harness, trace_id)
+        .await
 }

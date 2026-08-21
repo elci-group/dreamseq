@@ -132,3 +132,86 @@ fn yaml_scalar(value: &str) -> String {
     out.push('"');
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::DreamseqConfig;
+    use crate::report::{CandidateTool, InterventionCategory};
+
+    fn fixture(root: &Path) -> Anthology {
+        let config = DreamseqConfig {
+            anthologies_dir: root.join("anthologies"),
+            ..DreamseqConfig::default()
+        };
+        let mut anthology = Anthology::new(vec![], vec![], config);
+        anthology.executive_summary = "A quoted \"summary\"".into();
+        anthology.candidate_tools.push(CandidateTool {
+            id: "DS-1".into(),
+            name: "A \"quoted\" capability".into(),
+            priority: Priority::High,
+            category: InterventionCategory::WorkflowAcceleration,
+            reason: "line one\nline two".into(),
+            estimated_time_saved: "2 hours/week".into(),
+            confidence: 0.9,
+            affected_projects: vec!["dreamseq".into()],
+            existing_matches: vec!["existing-tool".into()],
+            mutation_fitness: 0.8,
+            capability_overlap: 0.2,
+            implementation_cost: "low".into(),
+        });
+        anthology
+    }
+
+    #[test]
+    fn saves_private_json_with_unique_run_identity() -> anyhow::Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "dreamseq-report-persistence-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let anthology = fixture(&root);
+        let path = save(&anthology)?;
+        assert!(path.ends_with(format!("dreamseq-{}-{}.json", anthology.date, anthology.id)));
+        let restored: Anthology = serde_json::from_slice(&std::fs::read(&path)?)?;
+        assert_eq!(restored.id, anthology.id);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&path)?.permissions().mode() & 0o777,
+                0o600
+            );
+        }
+        std::fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn saves_active_history_and_lifecycle_dreams_documents() -> anyhow::Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "dreamseq-dreams-persistence-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root)?;
+        let anthology = fixture(&root);
+        let active = save_dreams(&anthology, &root)?;
+        let rendered = std::fs::read_to_string(active)?;
+        assert!(rendered.contains("action: extend existing capability"));
+        assert!(rendered.contains("title: \"A \\\"quoted\\\" capability\""));
+        assert!(rendered.contains("reason: \"line one\\nline two\""));
+        assert!(root.join(".dreams/completed.dreams").exists());
+        assert!(root.join(".dreams/rejected.dreams").exists());
+        assert!(
+            root.join(".dreams/history")
+                .join(format!("{}-{}.dreams", anthology.date, anthology.id))
+                .exists()
+        );
+        std::fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn yaml_scalar_escapes_control_characters() {
+        assert_eq!(yaml_scalar("a\tb\rc\u{7}"), "\"a\\tb\\rc\\u0007\"");
+    }
+}

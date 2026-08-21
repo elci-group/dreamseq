@@ -15,10 +15,28 @@ forbid_regex = ["TODO", "FIXME", "unimplemented!", "panic!"]
 require_regex = ["CredentialStore", "device/authorize", "device/token", "api/v1/runs"]
 
 [[file]]
+path = "src/cloud_protocol.rs"
+required = true
+forbid_regex = ["TODO", "FIXME", "unimplemented!", "panic!"]
+require_regex = ["MAX_API_RESPONSE_BYTES", "parse_response", "trace_id"]
+
+[[file]]
+path = "src/cloud_sync.rs"
+required = true
+forbid_regex = ["TODO", "FIXME", "unimplemented!", "panic!"]
+require_regex = ["SyncSummary", "sync_directories_with_trace_id", "skipping non-anthology JSON"]
+
+[[file]]
 path = "src/groq.rs"
 required = true
 forbid_regex = ["TODO", "FIXME", "unimplemented!", "panic!"]
-require_regex = ["DREAMSEQ_BYOK_ROUTES", "configured_byok_routes", "validate_provider_url"]
+require_regex = ["DREAMSEQ_BYOK_ROUTES", "configured_byok_routes"]
+
+[[file]]
+path = "src/inference_providers.rs"
+required = true
+forbid_regex = ["TODO", "FIXME", "unimplemented!", "panic!"]
+require_regex = ["configured_byok_routes", "validate_provider_url"]
 
 [[file]]
 path = "src/inference_transport.rs"
@@ -34,6 +52,16 @@ required = true
 path = "README.md"
 required = true
 
+[[file]]
+path = "docs/dependency-risk-policy.md"
+required = true
+require_regex = ["RUSTSEC-2024-0429", "Review and removal criteria"]
+
+[[file]]
+path = "scripts/security-audit.sh"
+required = true
+require_regex = ["cargo audit --json", "RustSec warning set changed"]
+
 [[command]]
 name = "cargo fmt check"
 cmd = ["cargo", "fmt", "--", "--check"]
@@ -42,16 +70,36 @@ timeout_secs = 60
 
 [[command]]
 name = "cargo clippy"
-cmd = ["cargo", "clippy", "--all-targets", "--all-features", "--", "-D", "warnings"]
+cmd = ["cargo", "clippy", "--workspace", "--all-targets", "--all-features", "--", "-D", "warnings"]
 expect_exit = 0
 timeout_secs = 180
 
 [[command]]
 name = "cargo test"
-cmd = ["cargo", "test", "--all-targets", "--all-features", "--", "--skip", "groq_client_hits_custom_endpoint", "--skip", "full_pipeline_with_fixture_data", "--skip", "routed_inference_falls_back_to_byok", "--skip", "routed_inference_prefers_dreamsequence_cloud"]
+cmd = ["cargo", "test", "--workspace", "--all-targets", "--all-features", "--", "--skip", "a_rate_limited_route_is_not_hit_again_until_its_cooldown_expires", "--skip", "auto_approved_remote_consent_is_recorded", "--skip", "dispatches_to_an_anthropic_shaped_route_correctly", "--skip", "full_pipeline_with_fixture_data", "--skip", "groq_client_hits_custom_endpoint", "--skip", "nonempty_pipeline_auto_approve_skips_prompt", "--skip", "preconfigured_remote_consent_is_recorded", "--skip", "route_priority_is_ranked_by_batch_complexity_not_rotation", "--skip", "routed_inference_falls_back_to_byok", "--skip", "routed_inference_prefers_dreamsequence_cloud"]
 expect_exit = 0
 timeout_secs = 300
 stdout_contains = ["test result: ok"]
+
+[[command]]
+name = "traci production check"
+cmd = ["traci", "check", "src", "--production-only", "--fail-on", "warning", "--color", "never", "--no-emoji", "--no-animate"]
+expect_exit = 0
+timeout_secs = 60
+
+[[command]]
+name = "mobile tests"
+cmd = ["npm", "test"]
+cwd = "mobile"
+expect_exit = 0
+timeout_secs = 120
+
+[[command]]
+name = "mobile build"
+cmd = ["npm", "run", "build"]
+cwd = "mobile"
+expect_exit = 0
+timeout_secs = 120
 
 [git]
 no_uncommitted_changes = false

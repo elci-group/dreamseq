@@ -245,8 +245,9 @@ fn near_duplicate_findings_consolidate_into_one_pattern_with_max_not_summed_minu
         ],
         workflow_bottlenecks: vec![
             WorkflowBottleneck {
-                description: "Responses API missing handler for function_call_arguments.delta events"
-                    .to_string(),
+                description:
+                    "Responses API missing handler for function_call_arguments.delta events"
+                        .to_string(),
                 frequency: 4,
                 time_impact_minutes: 20.0,
             },
@@ -285,7 +286,10 @@ fn near_duplicate_findings_consolidate_into_one_pattern_with_max_not_summed_minu
         bottlenecks.len(),
         2,
         "expected the three near-duplicate Responses-API findings to consolidate into one, got: {:#?}",
-        bottlenecks.iter().map(|p| &p.description).collect::<Vec<_>>()
+        bottlenecks
+            .iter()
+            .map(|p| &p.description)
+            .collect::<Vec<_>>()
     );
 
     let consolidated = bottlenecks
@@ -321,6 +325,121 @@ fn near_duplicate_findings_consolidate_into_one_pattern_with_max_not_summed_minu
     assert_eq!(
         missing_tool_count, 1,
         "a MissingTool finding must never merge into a WorkflowBottleneck cluster even with identical wording"
+    );
+}
+
+#[test]
+fn consolidation_ignores_shared_template_boilerplate_when_comparing() {
+    // Several pattern types format their description with a fixed prefix
+    // ("Repeated command: ", "Repeated prompt pattern: ") that every
+    // pattern of that type shares. Since consolidation already groups by
+    // type, that boilerplate must not itself count toward similarity —
+    // otherwise short, unrelated findings within a type would falsely
+    // clear the Jaccard threshold on shared boilerplate alone.
+    use dreamseq::groq::{Analysis, RepeatedCommand, RepeatedPrompt};
+    use dreamseq::patterns::{PatternExtractor, PatternType};
+
+    let extractor = PatternExtractor::new();
+    let analysis = Analysis {
+        model_failures: vec![],
+        harness_friction: vec![],
+        missing_tooling: vec![],
+        workflow_bottlenecks: vec![],
+        repeated_commands: vec![
+            RepeatedCommand {
+                command: "ls".to_string(),
+                frequency: 3,
+                context: "a".to_string(),
+            },
+            RepeatedCommand {
+                command: "cd".to_string(),
+                frequency: 3,
+                context: "a".to_string(),
+            },
+        ],
+        repeated_prompts: vec![
+            RepeatedPrompt {
+                prompt_pattern: "fix the bug".to_string(),
+                frequency: 3,
+                suggested_improvement: "x".to_string(),
+            },
+            RepeatedPrompt {
+                prompt_pattern: "add tests".to_string(),
+                frequency: 3,
+                suggested_improvement: "x".to_string(),
+            },
+        ],
+        context_loss: vec![],
+        automation_opportunities: vec![],
+    };
+
+    let patterns = extractor.extract(&analysis).unwrap();
+    let repeated_command_count = patterns
+        .iter()
+        .filter(|pattern| matches!(pattern.pattern_type, PatternType::RepeatedCommand))
+        .count();
+    let repeated_prompt_count = patterns
+        .iter()
+        .filter(|pattern| matches!(pattern.pattern_type, PatternType::RepeatedPrompt))
+        .count();
+    assert_eq!(
+        repeated_command_count, 2,
+        "'ls' and 'cd' are unrelated commands and must not merge on shared boilerplate"
+    );
+    assert_eq!(
+        repeated_prompt_count, 2,
+        "'fix the bug' and 'add tests' are unrelated prompts and must not merge on shared boilerplate"
+    );
+}
+
+#[test]
+fn candidate_tools_with_the_same_generated_name_are_not_duplicated() {
+    // suggest_tool_name buckets by crude keyword match ("git" ->
+    // "git-assistant"), so two patterns of different types — never merged
+    // by patterns::consolidate, which stays within a type — can still land
+    // on the same generated tool name. The final report must not show the
+    // same suggestion twice for genuinely distinct findings.
+    use dreamseq::patterns::{Pattern, PatternType};
+    use dreamseq::{Anthology, DreamseqConfig};
+
+    let patterns = vec![
+        Pattern {
+            id: "a".into(),
+            pattern_type: PatternType::HarnessFriction,
+            description: "codex friction: git rebase confusing".into(),
+            frequency: 1,
+            confidence: 0.9,
+            impact_score: 0.9,
+            affected_harnesses: vec!["codex".into()],
+            estimated_minutes_per_day: None,
+            manifestation_count: 1,
+        },
+        Pattern {
+            id: "b".into(),
+            pattern_type: PatternType::HarnessFriction,
+            description: "cursor friction: git blame slow".into(),
+            frequency: 1,
+            confidence: 0.9,
+            impact_score: 0.9,
+            affected_harnesses: vec!["cursor".into()],
+            estimated_minutes_per_day: None,
+            manifestation_count: 1,
+        },
+    ];
+
+    let mut anthology = Anthology::new(patterns, Vec::new(), DreamseqConfig::default());
+    anthology.generate().unwrap();
+
+    let git_tools: Vec<_> = anthology
+        .candidate_tools
+        .iter()
+        .filter(|tool| tool.name == "git-assistant")
+        .collect();
+    assert_eq!(
+        git_tools.len(),
+        1,
+        "distinct findings that generate the same tool name must not appear twice, got: {:#?}",
+        git_tools
     );
 }
 
@@ -363,7 +482,8 @@ fn candidate_tools_show_real_minutes_only_when_evidence_backed() {
         .find(|tool| tool.reason.contains("Slow CI"))
         .expect("evidenced pattern should produce a candidate tool");
     assert!(
-        evidenced.estimated_time_saved.contains("min/day") && evidenced.estimated_time_saved.contains("evidence-based"),
+        evidenced.estimated_time_saved.contains("min/day")
+            && evidenced.estimated_time_saved.contains("evidence-based"),
         "a pattern with a real minutes estimate should show it labeled as evidence-based, got: {}",
         evidenced.estimated_time_saved
     );
@@ -379,7 +499,9 @@ fn candidate_tools_show_real_minutes_only_when_evidence_backed() {
         unevidenced.estimated_time_saved
     );
     assert!(
-        unevidenced.estimated_time_saved.starts_with("Estimated impact:"),
+        unevidenced
+            .estimated_time_saved
+            .starts_with("Estimated impact:"),
         "should fall back to a qualitative impact label, got: {}",
         unevidenced.estimated_time_saved
     );
@@ -541,8 +663,8 @@ async fn routed_inference_prefers_dreamsequence_cloud() {
 #[tokio::test]
 async fn a_rate_limited_route_is_not_hit_again_until_its_cooldown_expires() {
     use dreamseq::cloud::Credentials;
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
@@ -642,8 +764,8 @@ async fn a_rate_limited_route_is_not_hit_again_until_its_cooldown_expires() {
 
 #[tokio::test]
 async fn route_priority_is_ranked_by_batch_complexity_not_rotation() {
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 

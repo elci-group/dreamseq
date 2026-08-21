@@ -140,7 +140,9 @@ mod tests {
 
     #[test]
     fn jaccard_finds_near_duplicate_short_phrases_that_tfidf_misses() {
-        let a = meaningful_words("Responses API missing handler for function_call_arguments.delta events");
+        let a = meaningful_words(
+            "Responses API missing handler for function_call_arguments.delta events",
+        );
         let b = meaningful_words("Responses API missing handler for in_progress events");
         let unrelated = meaningful_words("Docker healthcheck exceeds latency threshold repeatedly");
 
@@ -158,14 +160,20 @@ mod tests {
 
     #[test]
     fn identical_documents_are_maximally_similar() {
-        let docs = vec!["missing tool for quota monitoring", "unrelated topic entirely"];
+        let docs = vec![
+            "missing tool for quota monitoring",
+            "unrelated topic entirely",
+        ];
         let vectors = tfidf_vectors(&docs);
         assert!(cosine_similarity(&vectors[0], &vectors[0]) > 0.99);
     }
 
     #[test]
     fn unrelated_documents_are_dissimilar() {
-        let docs = vec!["missing tool for quota monitoring", "docker healthcheck latency issue"];
+        let docs = vec![
+            "missing tool for quota monitoring",
+            "docker healthcheck latency issue",
+        ];
         let vectors = tfidf_vectors(&docs);
         assert!(cosine_similarity(&vectors[0], &vectors[1]) < 0.3);
     }

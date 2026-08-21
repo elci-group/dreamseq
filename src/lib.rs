@@ -17,6 +17,7 @@ pub mod report;
 mod report_persistence;
 pub mod segmentation;
 pub mod steering;
+pub mod telemetry;
 pub(crate) mod text_similarity;
 pub mod trends;
 
@@ -90,7 +91,14 @@ impl Dreamseq {
     }
 
     /// Run the complete Dreamseq pipeline
+    // traci: allow -- compatibility wrapper creates and propagates a trace_id.
     pub async fn run(&mut self) -> Result<Anthology> {
+        let trace_id = crate::telemetry::new_trace_id();
+        self.run_with_trace_id(&trace_id).await
+    }
+
+    #[tracing::instrument(skip_all, fields(trace_id = %trace_id))]
+    pub async fn run_with_trace_id(&mut self, trace_id: &str) -> Result<Anthology> {
         tracing::info!(
             harnesses = self.config.harnesses.len(),
             "starting Dreamseq pipeline"
@@ -107,7 +115,7 @@ impl Dreamseq {
         progress::stage("🔍", "Aggregating harness logs...");
         let (raw_logs, ingestion_report) = self
             .aggregator
-            .aggregate_with_report(&self.config.harnesses)
+            .aggregate_with_report_with_trace_id(&self.config.harnesses, trace_id)
             .await?;
         let raw_count = raw_logs.len();
         self.save_ingestion_report(&ingestion_report).await?;
@@ -139,7 +147,10 @@ impl Dreamseq {
                 &format!("Analyzing {} segment(s) via inference...", segments.len()),
             );
         }
-        let analysis = self.groq_client.analyze(&segments).await?;
+        let analysis = self
+            .groq_client
+            .analyze_with_trace_id(&segments, trace_id)
+            .await?;
         tracing::info!(
             segments = segments.len(),
             "completed routed inference analysis"
@@ -171,7 +182,11 @@ impl Dreamseq {
 
         // Step 8: Cross-day trend analysis
         progress::stage("📈", "Running cross-day trend analysis...");
-        match self.trend_analyzer.analyze(&anthology).await {
+        match self
+            .trend_analyzer
+            .analyze_with_trace_id(&anthology, trace_id)
+            .await
+        {
             Ok(trends) => {
                 anthology.add_trends(trends);
                 tracing::info!(anthology_id = %anthology.id, "added trend analysis");

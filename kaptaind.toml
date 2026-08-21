@@ -33,6 +33,12 @@ min_commit_interval = 900
 command = "bash scripts/release-gate.sh"
 required = true
 
+[trust]
+execution = "trusted"
+
+[operation]
+mode = "actuate"
+
 [staging]
 mode = "cluster"
 exclude = [".env*", "*.log", "target/**", ".kaptaind/**", "artifacts/**"]

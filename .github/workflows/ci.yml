@@ -30,7 +30,44 @@ jobs:
         run: cargo clippy --all-targets --all-features -- -D warnings
 
       - name: Run tests
-        run: cargo test --all-targets --all-features
+        run: cargo test --workspace --all-targets --all-features
+
+      - name: Install coverage tooling
+        run: cargo install cargo-llvm-cov --version 0.8.7 --locked
+
+      - name: Enforce Rust line coverage floor
+        run: cargo llvm-cov --workspace --all-features --fail-under-lines 70
+
+      - name: Install Traci observability checker
+        run: >-
+          cargo install --git https://github.com/elci-group/traci.git
+          --rev 0d802d8e95faea76141a980744cba577e94bb6c7 --locked traci
+
+      - name: Check production observability
+        run: traci check src --production-only --fail-on warning --color never --no-emoji --no-animate
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Install mobile dependencies
+        working-directory: mobile
+        run: npm ci
+
+      - name: Test mobile frontend
+        working-directory: mobile
+        run: npm test
+
+      - name: Build mobile frontend
+        working-directory: mobile
+        run: npm run build
+
+      - name: Audit mobile dependencies
+        working-directory: mobile
+        run: npm audit --audit-level=high
 
       - name: Verify deterministic release tooling
         run: |
@@ -41,7 +78,7 @@ jobs:
         run: cargo install cargo-audit --locked
 
       - name: Audit dependencies
-        run: cargo audit
+        run: scripts/security-audit.sh
 
       - name: Check dependency licenses and sources
         uses: EmbarkStudios/cargo-deny-action@v2
@@ -61,3 +98,40 @@ jobs:
 
       - name: Verify distributable package
         run: cargo package --locked
+
+  mobile-android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust and Android build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: mobile/src-tauri
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Install mobile dependencies
+        working-directory: mobile
+        run: npm ci
+
+      - name: Configure Android NDK
+        run: |
+          test -d "$ANDROID_NDK_LATEST_HOME"
+          echo "NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
+
+      - name: Initialize Android project
+        working-directory: mobile
+        run: npm run tauri -- android init --ci
+
+      - name: Build Android debug APK
+        working-directory: mobile
+        run: npm run tauri -- android build --debug --apk --target aarch64 --ci

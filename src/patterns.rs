@@ -72,126 +72,151 @@ impl PatternExtractor {
 
         // Extract model failure patterns
         for failure in &analysis.model_failures {
-            patterns.push(Pattern {
-                id: uuid::Uuid::new_v4().to_string(),
-                pattern_type: PatternType::ModelFailure,
-                description: format!("{}: {}", failure.model, failure.issue),
-                frequency: failure.frequency,
-                confidence: 0.8,
-                impact_score: self.calculate_impact_score(failure.frequency as f64, 0.7),
-                affected_harnesses: vec![failure.model.clone()],
-                estimated_minutes_per_day: None,
-                manifestation_count: 1,
-            });
+            patterns.push((
+                Pattern {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    pattern_type: PatternType::ModelFailure,
+                    description: format!("{}: {}", failure.model, failure.issue),
+                    frequency: failure.frequency,
+                    confidence: 0.8,
+                    impact_score: self.calculate_impact_score(failure.frequency as f64, 0.7),
+                    affected_harnesses: vec![failure.model.clone()],
+                    estimated_minutes_per_day: None,
+                    manifestation_count: 1,
+                },
+                failure.issue.clone(),
+            ));
         }
 
         // Extract harness friction patterns
         for friction in &analysis.harness_friction {
-            patterns.push(Pattern {
-                id: uuid::Uuid::new_v4().to_string(),
-                pattern_type: PatternType::HarnessFriction,
-                description: format!("{} friction: {}", friction.harness, friction.issue),
-                frequency: 1,
-                confidence: friction.severity,
-                impact_score: friction.severity,
-                affected_harnesses: vec![friction.harness.clone()],
-                estimated_minutes_per_day: None,
-                manifestation_count: 1,
-            });
+            patterns.push((
+                Pattern {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    pattern_type: PatternType::HarnessFriction,
+                    description: format!("{} friction: {}", friction.harness, friction.issue),
+                    frequency: 1,
+                    confidence: friction.severity,
+                    impact_score: friction.severity,
+                    affected_harnesses: vec![friction.harness.clone()],
+                    estimated_minutes_per_day: None,
+                    manifestation_count: 1,
+                },
+                friction.issue.clone(),
+            ));
         }
 
         // Extract missing tool patterns
         for tool in &analysis.missing_tooling {
-            patterns.push(Pattern {
-                id: uuid::Uuid::new_v4().to_string(),
-                pattern_type: PatternType::MissingTool,
-                description: format!("Missing tool: {} - {}", tool.tool_name, tool.purpose),
-                frequency: 1,
-                confidence: 0.9,
-                impact_score: tool.estimated_value,
-                affected_harnesses: vec![],
-                estimated_minutes_per_day: None,
-                manifestation_count: 1,
-            });
+            patterns.push((
+                Pattern {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    pattern_type: PatternType::MissingTool,
+                    description: format!("Missing tool: {} - {}", tool.tool_name, tool.purpose),
+                    frequency: 1,
+                    confidence: 0.9,
+                    impact_score: tool.estimated_value,
+                    affected_harnesses: vec![],
+                    estimated_minutes_per_day: None,
+                    manifestation_count: 1,
+                },
+                format!("{} {}", tool.tool_name, tool.purpose),
+            ));
         }
 
         // Extract workflow bottleneck patterns
         for bottleneck in &analysis.workflow_bottlenecks {
-            patterns.push(Pattern {
-                id: uuid::Uuid::new_v4().to_string(),
-                pattern_type: PatternType::WorkflowBottleneck,
-                description: bottleneck.description.clone(),
-                frequency: bottleneck.frequency,
-                confidence: 0.85,
-                impact_score: self.calculate_impact_score(
-                    bottleneck.frequency as f64,
-                    bottleneck.time_impact_minutes / 60.0,
-                ),
-                affected_harnesses: vec![],
-                estimated_minutes_per_day: Some(bottleneck.time_impact_minutes),
-                manifestation_count: 1,
-            });
+            patterns.push((
+                Pattern {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    pattern_type: PatternType::WorkflowBottleneck,
+                    description: bottleneck.description.clone(),
+                    frequency: bottleneck.frequency,
+                    confidence: 0.85,
+                    impact_score: self.calculate_impact_score(
+                        bottleneck.frequency as f64,
+                        bottleneck.time_impact_minutes / 60.0,
+                    ),
+                    affected_harnesses: vec![],
+                    estimated_minutes_per_day: Some(bottleneck.time_impact_minutes),
+                    manifestation_count: 1,
+                },
+                bottleneck.description.clone(),
+            ));
         }
 
         // Extract repeated command patterns
         for command in &analysis.repeated_commands {
-            patterns.push(Pattern {
-                id: uuid::Uuid::new_v4().to_string(),
-                pattern_type: PatternType::RepeatedCommand,
-                description: format!("Repeated command: {}", command.command),
-                frequency: command.frequency,
-                confidence: 0.95,
-                impact_score: self.calculate_impact_score(command.frequency as f64, 0.5),
-                affected_harnesses: vec![command.context.clone()],
-                estimated_minutes_per_day: None,
-                manifestation_count: 1,
-            });
+            patterns.push((
+                Pattern {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    pattern_type: PatternType::RepeatedCommand,
+                    description: format!("Repeated command: {}", command.command),
+                    frequency: command.frequency,
+                    confidence: 0.95,
+                    impact_score: self.calculate_impact_score(command.frequency as f64, 0.5),
+                    affected_harnesses: vec![command.context.clone()],
+                    estimated_minutes_per_day: None,
+                    manifestation_count: 1,
+                },
+                command.command.clone(),
+            ));
         }
 
         // Extract repeated prompt patterns
         for prompt in &analysis.repeated_prompts {
-            patterns.push(Pattern {
-                id: uuid::Uuid::new_v4().to_string(),
-                pattern_type: PatternType::RepeatedPrompt,
-                description: format!("Repeated prompt pattern: {}", prompt.prompt_pattern),
-                frequency: prompt.frequency,
-                confidence: 0.9,
-                impact_score: self.calculate_impact_score(prompt.frequency as f64, 0.3),
-                affected_harnesses: vec![],
-                estimated_minutes_per_day: None,
-                manifestation_count: 1,
-            });
+            patterns.push((
+                Pattern {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    pattern_type: PatternType::RepeatedPrompt,
+                    description: format!("Repeated prompt pattern: {}", prompt.prompt_pattern),
+                    frequency: prompt.frequency,
+                    confidence: 0.9,
+                    impact_score: self.calculate_impact_score(prompt.frequency as f64, 0.3),
+                    affected_harnesses: vec![],
+                    estimated_minutes_per_day: None,
+                    manifestation_count: 1,
+                },
+                prompt.prompt_pattern.clone(),
+            ));
         }
 
         // Extract context loss patterns
         for loss in &analysis.context_loss {
-            patterns.push(Pattern {
-                id: uuid::Uuid::new_v4().to_string(),
-                pattern_type: PatternType::ContextLoss,
-                description: loss.description.clone(),
-                frequency: loss.affected_segments.len(),
-                confidence: 0.75,
-                impact_score: self.calculate_impact_score(loss.affected_segments.len() as f64, 0.8),
-                affected_harnesses: loss.affected_segments.clone(),
-                estimated_minutes_per_day: None,
-                manifestation_count: 1,
-            });
+            patterns.push((
+                Pattern {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    pattern_type: PatternType::ContextLoss,
+                    description: loss.description.clone(),
+                    frequency: loss.affected_segments.len(),
+                    confidence: 0.75,
+                    impact_score: self
+                        .calculate_impact_score(loss.affected_segments.len() as f64, 0.8),
+                    affected_harnesses: loss.affected_segments.clone(),
+                    estimated_minutes_per_day: None,
+                    manifestation_count: 1,
+                },
+                loss.description.clone(),
+            ));
         }
 
         // Extract automation opportunities
         for opportunity in &analysis.automation_opportunities {
-            patterns.push(Pattern {
-                id: uuid::Uuid::new_v4().to_string(),
-                pattern_type: PatternType::AutomationOpportunity,
-                description: opportunity.description.clone(),
-                frequency: 1,
-                confidence: opportunity.confidence,
-                impact_score: self
-                    .calculate_impact_score(1.0, opportunity.estimated_time_saved / 60.0),
-                affected_harnesses: vec![],
-                estimated_minutes_per_day: Some(opportunity.estimated_time_saved),
-                manifestation_count: 1,
-            });
+            patterns.push((
+                Pattern {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    pattern_type: PatternType::AutomationOpportunity,
+                    description: opportunity.description.clone(),
+                    frequency: 1,
+                    confidence: opportunity.confidence,
+                    impact_score: self
+                        .calculate_impact_score(1.0, opportunity.estimated_time_saved / 60.0),
+                    affected_harnesses: vec![],
+                    estimated_minutes_per_day: Some(opportunity.estimated_time_saved),
+                    manifestation_count: 1,
+                },
+                opportunity.description.clone(),
+            ));
         }
 
         let mut patterns = consolidate(patterns);
@@ -223,10 +248,24 @@ impl PatternExtractor {
 /// overlaps, and merging them would blur a distinction the rest of the
 /// pipeline (candidate-tool categorization, user-behaviour extraction)
 /// still relies on.
-fn consolidate(patterns: Vec<Pattern>) -> Vec<Pattern> {
-    let mut by_type: HashMap<PatternType, Vec<Pattern>> = HashMap::new();
-    for pattern in patterns {
-        by_type.entry(pattern.pattern_type).or_default().push(pattern);
+///
+/// Each pattern is paired with a separate `comparison_text` rather than
+/// comparing on `Pattern::description` directly: several pattern types
+/// format their description with a fixed prefix ("Repeated command: ",
+/// "Missing tool: ", "{harness} friction: ") that every pattern of that type
+/// shares. Since patterns are already grouped by type before comparison,
+/// that boilerplate would be common to every pair and inflate Jaccard
+/// similarity for short, otherwise-unrelated findings (e.g. "Repeated
+/// command: ls" vs "Repeated command: cd" sharing "repeated"/"command").
+/// `comparison_text` carries just the substantive part (the issue, purpose,
+/// command, or prompt text) so similarity reflects real content overlap.
+fn consolidate(patterns: Vec<(Pattern, String)>) -> Vec<Pattern> {
+    let mut by_type: HashMap<PatternType, Vec<(Pattern, String)>> = HashMap::new();
+    for (pattern, comparison_text) in patterns {
+        by_type
+            .entry(pattern.pattern_type)
+            .or_default()
+            .push((pattern, comparison_text));
     }
 
     let mut consolidated = Vec::new();
@@ -236,14 +275,14 @@ fn consolidate(patterns: Vec<Pattern>) -> Vec<Pattern> {
     consolidated
 }
 
-fn consolidate_group(group: Vec<Pattern>) -> Vec<Pattern> {
+fn consolidate_group(group: Vec<(Pattern, String)>) -> Vec<Pattern> {
     if group.len() < 2 {
-        return group;
+        return group.into_iter().map(|(pattern, _)| pattern).collect();
     }
 
     let word_sets: Vec<_> = group
         .iter()
-        .map(|pattern| meaningful_words(&pattern.description))
+        .map(|(_, comparison_text)| meaningful_words(comparison_text))
         .collect();
 
     let mut merged_into: Vec<Option<usize>> = vec![None; group.len()];
@@ -268,7 +307,7 @@ fn consolidate_group(group: Vec<Pattern>) -> Vec<Pattern> {
 
     clusters
         .into_iter()
-        .map(|indices| merge_cluster(indices.into_iter().map(|i| group[i].clone()).collect()))
+        .map(|indices| merge_cluster(indices.into_iter().map(|i| group[i].0.clone()).collect()))
         .collect()
 }
 
@@ -295,7 +334,10 @@ fn merge_cluster(mut members: Vec<Pattern>) -> Pattern {
     affected_harnesses.dedup();
 
     let frequency = members.iter().map(|pattern| pattern.frequency).sum();
-    let manifestation_count = members.iter().map(|pattern| pattern.manifestation_count).sum();
+    let manifestation_count = members
+        .iter()
+        .map(|pattern| pattern.manifestation_count)
+        .sum();
     // Max, not sum: these findings are different wordings of the *same*
     // root cause, so their individual time estimates are competing
     // descriptions of one impact, not additive minutes. Summing would
@@ -304,7 +346,9 @@ fn merge_cluster(mut members: Vec<Pattern>) -> Pattern {
     let estimated_minutes_per_day = members
         .iter()
         .filter_map(|pattern| pattern.estimated_minutes_per_day)
-        .fold(None, |max, value| Some(max.map_or(value, |m: f64| m.max(value))));
+        .fold(None, |max, value| {
+            Some(max.map_or(value, |m: f64| m.max(value)))
+        });
     let confidence = members
         .iter()
         .map(|pattern| pattern.confidence)

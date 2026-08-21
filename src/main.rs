@@ -111,6 +111,7 @@ async fn main() -> Result<()> {
             publish_dreams,
         } => {
             init_tracing(verbose);
+            let trace_id = dreamseq::telemetry::new_trace_id();
 
             let config = if let Some(config_path) = config {
                 DreamseqConfig::load_from_path(std::path::Path::new(&config_path))?
@@ -120,11 +121,11 @@ async fn main() -> Result<()> {
 
             let repository = std::env::current_dir()?;
             let mut dreamseq = Dreamseq::new(config)?;
-            let mut anthology = dreamseq.run().await?;
+            let mut anthology = dreamseq.run_with_trace_id(&trace_id).await?;
 
             anthology.generate()?;
             let saved_path = anthology.save()?;
-            if let Err(error) = sync_if_paired(&anthology).await {
+            if let Err(error) = sync_if_paired(&anthology, &trace_id).await {
                 eprintln!("{} Cloud sync failed: {error}", "⚠️".yellow());
             }
             let (dreams_roots, dreams_paths) = if publish_dreams {
@@ -170,9 +171,12 @@ async fn main() -> Result<()> {
         }
         Commands::Login { api_url, no_open } => {
             init_tracing(false);
+            let trace_id = dreamseq::telemetry::new_trace_id();
             let store = CredentialStore::discover()?;
             let client = CloudClient::new(api_url.as_deref())?;
-            let credentials = client.pair(&store, !no_open).await?;
+            let credentials = client
+                .pair_with_trace_id(&store, !no_open, &trace_id)
+                .await?;
             println!(
                 "{} Device paired with account {}.",
                 "✅".green(),
@@ -181,10 +185,11 @@ async fn main() -> Result<()> {
         }
         Commands::Logout => {
             init_tracing(false);
+            let trace_id = dreamseq::telemetry::new_trace_id();
             let store = CredentialStore::discover()?;
             if let Some(credentials) = store.load_optional()? {
                 CloudClient::new(Some(&credentials.api_url))?
-                    .revoke(&credentials)
+                    .revoke_with_trace_id(&credentials, &trace_id)
                     .await?;
                 store.remove()?;
                 println!(
@@ -201,6 +206,7 @@ async fn main() -> Result<()> {
             json,
         } => {
             init_tracing(false);
+            let trace_id = dreamseq::telemetry::new_trace_id();
             let config = if let Some(config_path) = config {
                 DreamseqConfig::load_from_path(std::path::Path::new(&config_path))?
             } else {
@@ -214,7 +220,9 @@ async fn main() -> Result<()> {
             directories.dedup();
             let credentials = CredentialStore::discover()?.load()?;
             let client = CloudClient::new(Some(&credentials.api_url))?;
-            let summary = client.sync_directories(&credentials, &directories).await?;
+            let summary = client
+                .sync_directories_with_trace_id(&credentials, &directories, &trace_id)
+                .await?;
             if json {
                 println!("{}", serde_json::to_string(&summary)?);
             } else {
@@ -268,6 +276,7 @@ async fn main() -> Result<()> {
         }
         Commands::Trends { days, config } => {
             init_tracing(false);
+            let trace_id = dreamseq::telemetry::new_trace_id();
             let config = if let Some(config_path) = config {
                 DreamseqConfig::load_from_path(std::path::Path::new(&config_path))?
             } else {
@@ -278,7 +287,9 @@ async fn main() -> Result<()> {
             let most_recent = find_latest_anthology(&config.anthologies_dir)?;
 
             if let Some(anthology) = most_recent {
-                let trends = analyzer.analyze_for_days(&anthology, days).await?;
+                let trends = analyzer
+                    .analyze_for_days_with_trace_id(&anthology, days, &trace_id)
+                    .await?;
                 print_trends(&trends);
             } else {
                 println!(

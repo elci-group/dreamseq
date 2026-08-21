@@ -82,19 +82,45 @@ impl LogAggregator {
         Self
     }
 
+    // traci: allow -- compatibility wrapper creates and propagates a trace_id.
     pub async fn aggregate(&self, harnesses: &[HarnessConfig]) -> Result<Vec<LogEntry>> {
-        Ok(self.aggregate_with_report(harnesses).await?.0)
+        let trace_id = crate::telemetry::new_trace_id();
+        self.aggregate_with_trace_id(harnesses, &trace_id).await
     }
 
+    #[tracing::instrument(skip_all, fields(trace_id = %trace_id))]
+    pub async fn aggregate_with_trace_id(
+        &self,
+        harnesses: &[HarnessConfig],
+        trace_id: &str,
+    ) -> Result<Vec<LogEntry>> {
+        Ok(self
+            .aggregate_with_report_with_trace_id(harnesses, trace_id)
+            .await?
+            .0)
+    }
+
+    // traci: allow -- compatibility wrapper creates and propagates a trace_id.
     pub async fn aggregate_with_report(
         &self,
         harnesses: &[HarnessConfig],
+    ) -> Result<(Vec<LogEntry>, IngestionReport)> {
+        let trace_id = crate::telemetry::new_trace_id();
+        self.aggregate_with_report_with_trace_id(harnesses, &trace_id)
+            .await
+    }
+
+    #[tracing::instrument(skip_all, fields(trace_id = %trace_id))]
+    pub async fn aggregate_with_report_with_trace_id(
+        &self,
+        harnesses: &[HarnessConfig],
+        trace_id: &str,
     ) -> Result<(Vec<LogEntry>, IngestionReport)> {
         let mut all_entries = Vec::new();
         let mut report = IngestionReport::default();
 
         for harness in harnesses {
-            let (entries, harness_report) = self.aggregate_harness(harness).await;
+            let (entries, harness_report) = self.aggregate_harness(harness, trace_id).await;
             report.files_seen += harness_report.files_seen;
             report.files_failed += harness_report.files_failed;
             report.entries_accepted += harness_report.entries_accepted;
@@ -109,6 +135,7 @@ impl LogAggregator {
     async fn aggregate_harness(
         &self,
         harness: &HarnessConfig,
+        trace_id: &str,
     ) -> (Vec<LogEntry>, HarnessIngestion) {
         let mut report = HarnessIngestion {
             harness: harness.name.clone(),
@@ -131,7 +158,9 @@ impl LogAggregator {
 
         if matches!(harness.log_format, crate::config::LogFormat::Bound) {
             report.files_seen = 1;
-            return match crate::bound::aggregate_bound_harness(harness).await {
+            return match crate::bound::aggregate_bound_harness_with_trace_id(harness, trace_id)
+                .await
+            {
                 Ok(entries) => {
                     report.entries_accepted = entries.len();
                     (entries, report)

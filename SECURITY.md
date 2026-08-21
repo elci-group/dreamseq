@@ -20,7 +20,8 @@ mitigation with the reporter before public disclosure.
 
 ## Security boundaries
 
-- Remote analysis is disabled unless `allow_remote_analysis` is enabled.
+- Remote analysis is disabled unless `allow_remote_analysis` is enabled, either persisted in config or granted per-run via the interactive prompt.
+- `auto_approve_remote_analysis` bypasses the interactive prompt; enable it only for non-interactive use after reviewing the privacy implications.
 - Credentials are kept in environment variables or owner-only local files.
 - Production endpoints require HTTPS; loopback HTTP is test-only.
 - Remote prompt batches are bounded and common credentials, JWTs, emails, and
