@@ -1,0 +1,95 @@
+{
+  "harnesses": [
+    {
+      "harness": "claude",
+      "path": "/home/sal/.claude/telemetry",
+      "files_seen": 9,
+      "files_failed": 0,
+      "entries_accepted": 640,
+      "warnings": []
+    },
+    {
+      "harness": "grok",
+      "path": "/home/sal/.grok/logs",
+      "files_seen": 1,
+      "files_failed": 0,
+      "entries_accepted": 346,
+      "warnings": []
+    },
+    {
+      "harness": "kimi",
+      "path": "/home/sal/.kimi/logs",
+      "files_seen": 21,
+      "files_failed": 0,
+      "entries_accepted": 41121,
+      "warnings": []
+    },
+    {
+      "harness": "kimi-code",
+      "path": "/home/sal/.kimi-code/logs",
+      "files_seen": 1,
+      "files_failed": 0,
+      "entries_accepted": 5713,
+      "warnings": []
+    },
+    {
+      "harness": "crush",
+      "path": "/home/sal/.crush/logs",
+      "files_seen": 1,
+      "files_failed": 0,
+      "entries_accepted": 283,
+      "warnings": []
+    },
+    {
+      "harness": "factory",
+      "path": "/home/sal/.factory/logs",
+      "files_seen": 8,
+      "files_failed": 0,
+      "entries_accepted": 23044,
+      "warnings": []
+    },
+    {
+      "harness": "hermes",
+      "path": "/home/sal/.hermes/logs",
+      "files_seen": 8,
+      "files_failed": 0,
+      "entries_accepted": 2389,
+      "warnings": []
+    },
+    {
+      "harness": "openclaw",
+      "path": "/home/sal/.openclaw/logs",
+      "files_seen": 22,
+      "files_failed": 0,
+      "entries_accepted": 642,
+      "warnings": []
+    },
+    {
+      "harness": "openclaw-workspace",
+      "path": "/home/sal/.openclaw/workspace/memory",
+      "files_seen": 5,
+      "files_failed": 0,
+      "entries_accepted": 162,
+      "warnings": []
+    },
+    {
+      "harness": "gemini",
+      "path": "/home/sal/.gemini/antigravity-cli/conversations",
+      "files_seen": 0,
+      "files_failed": 0,
+      "entries_accepted": 0,
+      "warnings": []
+    },
+    {
+      "harness": "codex",
+      "path": "/home/sal/.codex/logs_2.sqlite",
+      "files_seen": 1,
+      "files_failed": 0,
+      "entries_accepted": 37521,
+      "warnings": []
+    }
+  ],
+  "files_seen": 77,
+  "files_failed": 0,
+  "entries_accepted": 111861
+}

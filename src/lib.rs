@@ -99,6 +99,10 @@ impl Dreamseq {
 
     #[tracing::instrument(skip_all, fields(trace_id = %trace_id))]
     pub async fn run_with_trace_id(&mut self, trace_id: &str) -> Result<Anthology> {
+        progress::separator();
+        progress::milestone("🌙", "Dreamseq Pipeline Starting");
+        progress::separator();
+
         tracing::info!(
             harnesses = self.config.harnesses.len(),
             "starting Dreamseq pipeline"
@@ -119,11 +123,13 @@ impl Dreamseq {
             .await?;
         let raw_count = raw_logs.len();
         self.save_ingestion_report(&ingestion_report).await?;
+        progress::progress(&format!("Found {} raw log entries", raw_count));
         tracing::info!(raw_entries = raw_count, "aggregated log entries");
 
         // Step 2: Normalize logs
         progress::stage("🧹", "Normalizing log entries...");
         let normalized_logs = self.normalizer.normalize(raw_logs)?;
+        progress::progress(&format!("Normalized {} entries", normalized_logs.len()));
         tracing::info!(
             normalized_entries = normalized_logs.len(),
             "normalized log entries while retaining repeated evidence"
@@ -137,6 +143,7 @@ impl Dreamseq {
             .map(|entry| entry.content.split_whitespace().count())
             .sum();
         let segments = self.segmenter.segment(normalized_logs)?;
+        progress::progress(&format!("Created {} semantic segments", segments.len()));
         tracing::info!(segments = segments.len(), "created semantic segments");
 
         // Step 4: Analyze with Groq
@@ -151,6 +158,7 @@ impl Dreamseq {
             .groq_client
             .analyze_with_trace_id(&segments, trace_id)
             .await?;
+        progress::progress("Inference analysis complete");
         tracing::info!(
             segments = segments.len(),
             "completed routed inference analysis"
@@ -159,11 +167,13 @@ impl Dreamseq {
         // Step 5: Extract patterns
         progress::stage("🗂️", "Extracting engineering patterns...");
         let patterns = self.pattern_extractor.extract(&analysis)?;
+        progress::progress(&format!("Extracted {} patterns", patterns.len()));
         tracing::info!(patterns = patterns.len(), "extracted engineering patterns");
 
         // Step 6: Detect user steering
         progress::stage("🧭", "Detecting steering events...");
         let steering_events = self.steering_detector.detect(&segments)?;
+        progress::progress(&format!("Detected {} steering events", steering_events.len()));
         tracing::info!(
             steering_events = steering_events.len(),
             "detected steering events"
@@ -179,6 +189,7 @@ impl Dreamseq {
             estimated_input_tokens,
             remote_analysis_consent: consent,
         });
+        progress::progress("Anthology generated");
 
         // Step 8: Cross-day trend analysis
         progress::stage("📈", "Running cross-day trend analysis...");
@@ -189,6 +200,7 @@ impl Dreamseq {
         {
             Ok(trends) => {
                 anthology.add_trends(trends);
+                progress::progress("Trend analysis complete");
                 tracing::info!(anthology_id = %anthology.id, "added trend analysis");
             }
             Err(error) => tracing::warn!(error = %error, "trend analysis was unavailable"),
@@ -198,11 +210,17 @@ impl Dreamseq {
         if let Some(monitor) = &self.kaptaind_monitor {
             progress::stage("🤖", "Running Kaptaind analysis...");
             match monitor.analyze() {
-                Ok(analysis) => tracing::info!(analysis, "Kaptaind analysis completed"),
+                Ok(analysis) => {
+                    progress::progress("Kaptaind analysis done");
+                    tracing::info!(analysis, "Kaptaind analysis completed");
+                }
                 Err(error) => tracing::warn!(error = %error, "Kaptaind analysis was unavailable"),
             }
         }
 
+        progress::separator();
+        progress::complete("Dreamseq pipeline complete!");
+        progress::separator();
         Ok(anthology)
     }
 
