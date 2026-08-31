@@ -27,7 +27,7 @@ static STAGE_COUNTER: AtomicUsize = AtomicUsize::new(0);
 const COLORS: &[u8] = &[196, 208, 226, 46, 51, 201, 165];
 
 fn fg(code: u8) -> String {
-    ansi::fg(&AnsiColor::Color256(code))
+    ansi::fg(&AnsiColor::Indexed(code))
 }
 
 /// Spinny animation frames
