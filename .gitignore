@@ -1,2 +1,4 @@
 /.kaptaind/
 /target/
+/mobile/node_modules/
+/anthologies/
