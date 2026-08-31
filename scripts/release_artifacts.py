@@ -121,5 +121,91 @@ def parser() -> argparse.ArgumentParser:
 
 
 if __name__ == "__main__":
-    arguments = parser().parse_args()
-    arguments.action(arguments)
+    def __curly_original_entry():
+        arguments = parser().parse_args()
+        arguments.action(arguments)
+    import sys
+    import subprocess
+    from curly_expand import expand_or_literal, cartesian
+
+    _raw_argv = sys.argv[:]
+    _positions = []
+    _fields = []
+    for _i, _a in enumerate(_raw_argv):
+        if _a == "--binary" and _i + 1 < len(_raw_argv):
+            _positions.append(_i + 1)
+            _fields.append(expand_or_literal(_raw_argv[_i + 1]))
+            break
+        if _a.startswith("--binary="):
+            _positions.append(_i)
+            _fields.append(["--binary=" + v for v in expand_or_literal(_a.split("=", 1)[1])])
+            break
+    for _i, _a in enumerate(_raw_argv):
+        if _a == "--readme" and _i + 1 < len(_raw_argv):
+            _positions.append(_i + 1)
+            _fields.append(expand_or_literal(_raw_argv[_i + 1]))
+            break
+        if _a.startswith("--readme="):
+            _positions.append(_i)
+            _fields.append(["--readme=" + v for v in expand_or_literal(_a.split("=", 1)[1])])
+            break
+    for _i, _a in enumerate(_raw_argv):
+        if _a == "--license" and _i + 1 < len(_raw_argv):
+            _positions.append(_i + 1)
+            _fields.append(expand_or_literal(_raw_argv[_i + 1]))
+            break
+        if _a.startswith("--license="):
+            _positions.append(_i)
+            _fields.append(["--license=" + v for v in expand_or_literal(_a.split("=", 1)[1])])
+            break
+    for _i, _a in enumerate(_raw_argv):
+        if _a == "--format" and _i + 1 < len(_raw_argv):
+            _positions.append(_i + 1)
+            _fields.append(expand_or_literal(_raw_argv[_i + 1]))
+            break
+        if _a.startswith("--format="):
+            _positions.append(_i)
+            _fields.append(["--format=" + v for v in expand_or_literal(_a.split("=", 1)[1])])
+            break
+    for _i, _a in enumerate(_raw_argv):
+        if _a == "--output" and _i + 1 < len(_raw_argv):
+            _positions.append(_i + 1)
+            _fields.append(expand_or_literal(_raw_argv[_i + 1]))
+            break
+        if _a.startswith("--output="):
+            _positions.append(_i)
+            _fields.append(["--output=" + v for v in expand_or_literal(_a.split("=", 1)[1])])
+            break
+    for _i, _a in enumerate(_raw_argv):
+        if _a == "--output" and _i + 1 < len(_raw_argv):
+            _positions.append(_i + 1)
+            _fields.append(expand_or_literal(_raw_argv[_i + 1]))
+            break
+        if _a.startswith("--output="):
+            _positions.append(_i)
+            _fields.append(["--output=" + v for v in expand_or_literal(_a.split("=", 1)[1])])
+            break
+    for _i, _a in enumerate(_raw_argv):
+        if _a == "--manifest" and _i + 1 < len(_raw_argv):
+            _positions.append(_i + 1)
+            _fields.append(expand_or_literal(_raw_argv[_i + 1]))
+            break
+        if _a.startswith("--manifest="):
+            _positions.append(_i)
+            _fields.append(["--manifest=" + v for v in expand_or_literal(_a.split("=", 1)[1])])
+            break
+
+    if not _fields or all(len(f) <= 1 for f in _fields):
+        __curly_original_entry()
+    else:
+        _combos = cartesian(_fields)
+        _failed = False
+        for _combo in _combos:
+            _new_argv = list(_raw_argv)
+            for _pos, _val in zip(_positions, _combo):
+                _new_argv[_pos] = _val
+            _r = subprocess.run([sys.executable] + _new_argv)
+            if _r.returncode != 0:
+                _failed = True
+        if _failed:
+            sys.exit(1)
