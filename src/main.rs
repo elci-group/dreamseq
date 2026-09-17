@@ -90,6 +90,36 @@ enum Commands {
         #[arg(short, long)]
         config: Option<String>,
     },
+    /// ⚙️ Interactively edit configuration: providers, fallback, harnesses
+    Config {
+        /// Path to configuration file
+        #[arg(short, long)]
+        config: Option<String>,
+    },
+    /// 🧭 Compare remotes against local repos with azusa and show cached drift scores
+    Drift {
+        /// Path to configuration file
+        #[arg(short, long)]
+        config: Option<String>,
+        /// Emit the drift view as JSON
+        #[arg(long)]
+        json: bool,
+        /// Skip the azusa scan and show only cached scores
+        #[arg(long)]
+        cached: bool,
+    },
+    /// 🧰 Detect agent harnesses, dev tools, and workstation specs, and report them
+    StackReport {
+        /// Print the composed payload without sending it
+        #[arg(long)]
+        dry_run: bool,
+        /// Print the API JSON response on success
+        #[arg(long)]
+        json: bool,
+        /// Comma-separated devtools registry batches to detect (default: all)
+        #[arg(long, value_parser = dreamseq::stack_report::parse_batches)]
+        batches: Option<std::collections::HashSet<u32>>,
+    },
 }
 
 fn init_tracing(verbose: bool) {
@@ -129,6 +159,19 @@ async fn __curly_original_main() -> Result<()> {
             let saved_path = anthology.save()?;
             if let Err(error) = sync_if_paired(&anthology, &trace_id).await {
                 eprintln!("{} Cloud sync failed: {error}", "⚠️".yellow());
+            }
+            if let Some(observations) = dreamseq.last_drift_observations()
+                && !observations.is_empty()
+            {
+                match dreamseq::azusa::upload_if_paired(observations, &trace_id).await {
+                    Ok(Some(count)) => {
+                        tracing::info!(count, "uploaded drift scores to Dreamsequence")
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        eprintln!("{} Drift score upload failed: {error}", "⚠️".yellow())
+                    }
+                }
             }
             let (dreams_roots, dreams_paths) = if publish_dreams {
                 save_dreams_to_speck_projects(&anthology)?
@@ -300,6 +343,37 @@ async fn __curly_original_main() -> Result<()> {
                     "dreamseq run".cyan()
                 );
             }
+        }
+        Commands::Config { config } => {
+            init_tracing(false);
+            let save_path = config.as_ref().map(std::path::PathBuf::from);
+            let loaded = if let Some(config_path) = &config {
+                DreamseqConfig::load_from_path(std::path::Path::new(config_path))?
+            } else {
+                DreamseqConfig::load()?
+            };
+            dreamseq::config_tui::run(loaded, save_path)?;
+        }
+        Commands::Drift {
+            config,
+            json,
+            cached,
+        } => {
+            init_tracing(false);
+            let config = if let Some(config_path) = config {
+                DreamseqConfig::load_from_path(std::path::Path::new(&config_path))?
+            } else {
+                DreamseqConfig::load()?
+            };
+            dreamseq::azusa::run_drift(&config, cached, json).await?;
+        }
+        Commands::StackReport {
+            dry_run,
+            json,
+            batches,
+        } => {
+            init_tracing(false);
+            dreamseq::stack_report::run_stack_report(dry_run, json, batches).await?;
         }
     }
 

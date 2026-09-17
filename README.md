@@ -214,6 +214,9 @@ Dreamseq uses a JSON configuration file at `~/.config/dreamseq/config.json` (leg
 | `enable_kaptaind` | ✅ Yes | Opt in to Kaptaind status and analysis integration. Defaults to `false` because external analyzers may write project metadata. |
 | `allow_remote_analysis` | ✅ Yes | Explicit consent to send redacted excerpts to Dreamsequence or configured BYOK endpoints. Defaults to `false`. |
 | `auto_approve_remote_analysis` | ✅ Yes | When `true` and `allow_remote_analysis` is `false`, automatically grant one-time consent instead of prompting. Defaults to `false`; use only after reviewing the privacy implications. |
+| `tier` | ❌ No | Account tier: `free` (default), `pro`, or `enterprise`. Gates how many per-device azusa drift scores are shown per repository: 1, up to 4, or up to 16 averaged into a single score. |
+| `device_name` | ❌ No | Display name attached to this device's azusa drift observations. Defaults to the OS hostname. |
+| `enable_drift` | ❌ No | When `true` (default), `dreamseq run` measures drift for the current repo and every cached repo available locally, and uploads fresh scores when this device is paired with Dreamsequence. |
 
 ---
 
@@ -258,6 +261,65 @@ dreamseq trends --days 30 --config /path/to/config.json
 # View trend analysis
 dreamseq trends --days 30
 ```
+
+### Repository Drift Scores
+
+Dreamseq integrates [azusa](https://github.com/elci-group/azusa) — repository
+drift intelligence — to compare the remotes your repositories are hosted on
+(GitHub, GitLab, Bitbucket, …) against local clones, and to keep a
+cross-device cache of the resulting drift scores.
+
+```bash
+# Fetch remotes, score the current repo with azusa, show every cached repo
+dreamseq drift
+
+# Show cached scores only (no fetch, no azusa scan)
+dreamseq drift --cached
+
+# Machine-readable drift view
+dreamseq drift --json
+```
+
+Each score names both sides of the comparison: the remote (as of the time it
+was last fetched) and the local repo on a named device (as of the scan).
+Scores are cached per user under `~/.config/dreamseq/drift-cache.json`, keyed
+by origin URL, so observations from all of a user's devices aggregate onto
+the same repository. Display limits follow the configured `tier`: free shows
+one local score per repo, pro shows up to four, and enterprise averages up to
+sixteen device scores into a single collaboration score. Requires the
+`azusa` CLI on `PATH` (or `AZUSA_BINARY` set); without it, cached scores are
+still shown.
+
+`dreamseq run` also measures drift automatically (config `enable_drift`,
+default on): the pipeline scores the current repo plus every cached repo that
+exists locally, then uploads fresh observations to the paired Dreamsequence
+account — `POST /api/v1/drift` — so the website's drift scores stay current
+for every logged-in device. Uploads only happen when this device is paired
+via `dreamseq login`; drift measurement itself is best-effort and never
+fails a run.
+
+### Stack Reports
+
+`dreamseq stack-report` detects this workstation's specs (OS, CPU, memory,
+OEM), installed agent harnesses (Claude Code, Codex, Cursor, Windsurf, …),
+and a registry of ~490 developer tools (editors, package managers, cloud
+CLIs, game engines, …), then reports them to the paired Dreamsequence
+account — `POST /api/v1/device/report` — so the website's stack view stays
+current for every logged-in device. Detection is read-only and best-effort:
+a missing package manager or a `--version` hang never fails the report.
+
+```bash
+# Detect and print the payload without sending it
+dreamseq stack-report --dry-run
+
+# Send the report and print the API's JSON response
+dreamseq stack-report --json
+
+# Only detect a subset of the devtools registry's staged rollout batches
+dreamseq stack-report --dry-run --batches 1,2,3
+```
+
+Requires this device to be paired via `dreamseq login`.
 
 ---
 

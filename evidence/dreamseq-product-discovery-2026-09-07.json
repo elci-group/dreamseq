@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "observed_at": "2026-09-07T00:00:00Z",
+  "repository_revision": "d2d7604",
+  "scope": "repository inspection; external evidence not rerun",
+  "readiness": {
+    "score": 5.48,
+    "scale": 10,
+    "formula": "(3*10 + 7*12 + 7*10 + 6*15 + 6*13 + 6*15 + 5*8 + 6*10 + 1*7) / 100",
+    "release_gate": 9.0,
+    "passed": false,
+    "assessment_ref": "docs/readiness-assessment-2026-09-07.md"
+  },
+  "deliverables": [
+    "docs/dreamseq-product-discovery-report.md",
+    "docs/dreamops-v1-spec.md",
+    "docs/readiness-assessment-2026-09-07.md"
+  ],
+  "answer_status_counts": {
+    "confirmed": 42,
+    "inferred": 39,
+    "contradicted": 4,
+    "unknown": 10,
+    "external evidence required": 5
+  },
+  "answers": {
+    "count": 100,
+    "report_ref": "docs/dreamseq-product-discovery-report.md",
+    "status_rule": "Every numbered answer has an explicit status, evidence reference, product implication, dreamops implication, and owner/deadline in the report."
+  },
+  "key_findings": [
+    {"check_id":"pilot.current-outcomes","status":"fail","expected":"nonzero current pilot outcomes","actual":"repository evidence describes zero runs/opportunities/outcomes","evidence_ref":"sha256:report-current-state","remediation":"admit consented partners and repair weekly aggregation"},
+    {"check_id":"contracts.weekly-pilot-evidence","status":"fail","expected":"runs_succeeded_observed=2","actual":"runs_succeeded_observed=0","source":"dreamsequence-api/tests/smoke.sh","evidence_ref":"sha256:report-q75","remediation":"reconcile weekly aggregation with review outcome storage"},
+    {"check_id":"readiness.score","status":"fail","expected":"score >= 9.0","actual":"5.48","evidence_ref":"sha256:readiness-assessment-2026-09-07","remediation":"close customer, deployment, rotation, billing and current evidence gaps"},
+    {"check_id":"deployment.current-tuple","status":"unknown","expected":"current source/artifact/schema/CLI/Dreamboat tuple","actual":"historical tuples exist; 2026-09-07 tuple absent","evidence_ref":"sha256:report-q71","remediation":"capture signed deployment manifest"},
+    {"check_id":"billing.hosted-lifecycle","status":"unknown","expected":"purchase, seat, failed-payment, refund, cancellation, reactivation receipts","actual":"boundary denial and simulator only","evidence_ref":"evidence/stripe-production-boundary-2026-08-13.json","remediation":"run approved test-mode lifecycle"}
+  ],
+  "freshness_policy": {
+    "deployment_and_health_hours": 24,
+    "slo_security_inference_days": 7,
+    "restore_billing_identity_days": 30,
+    "pilot_outcomes_days": 7
+  },
+  "redaction": "No credentials, tenant content, prompts, source, paths, personal names, or tenant identifiers included."
+}

@@ -19,6 +19,7 @@ mod cloud_protocol;
 #[path = "cloud_sync.rs"]
 mod cloud_sync;
 pub use cloud_envelope::RunEnvelope;
+use cloud_envelope::DriftEnvelope;
 pub use cloud_protocol::DeviceAuthorization;
 use cloud_protocol::{DevicePoll, DeviceToken, parse_response};
 pub use cloud_sync::SyncSummary;
@@ -260,6 +261,49 @@ impl CloudClient {
             .await?;
         let _: serde_json::Value = parse_response(response, trace_id).await?;
         Ok(())
+    }
+
+    /// Publish fresh azusa drift observations for this device. The server
+    /// keys observations by (account, device, repo identity), so re-uploading
+    /// replaces the device's previous scores for those repos; the website's
+    /// per-repo view applies the account tier's display limits.
+    #[tracing::instrument(skip_all, fields(trace_id = %trace_id, observations = observations.len()))]
+    pub async fn upload_drift_with_trace_id(
+        &self,
+        credentials: &Credentials,
+        observations: &[crate::azusa::RecordedObservation],
+        trace_id: &str,
+    ) -> Result<()> {
+        let envelope =
+            DriftEnvelope::from_observations(observations, &credentials.device_id, Utc::now());
+        let response = self
+            .http
+            .post(format!("{}/api/v1/drift", self.base_url))
+            .bearer_auth(&credentials.access_token)
+            .json(&envelope)
+            .send()
+            .await?;
+        let _: serde_json::Value = parse_response(response, trace_id).await?;
+        Ok(())
+    }
+
+    /// Report this device's workstation specs, detected agent harnesses, and
+    /// installed developer tools to the paired Dreamsequence account.
+    #[tracing::instrument(skip_all, fields(trace_id = %trace_id))]
+    pub async fn report_stack_with_trace_id(
+        &self,
+        credentials: &Credentials,
+        payload: &crate::stack_report::StackReportPayload,
+        trace_id: &str,
+    ) -> Result<serde_json::Value> {
+        let response = self
+            .http
+            .post(format!("{}/api/v1/device/report", self.base_url))
+            .bearer_auth(&credentials.access_token)
+            .json(payload)
+            .send()
+            .await?;
+        parse_response(response, trace_id).await
     }
 }
 

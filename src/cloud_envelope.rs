@@ -120,6 +120,58 @@ pub(super) fn parse_hours(value: &str) -> f64 {
         .unwrap_or(0.0)
 }
 
+#[derive(Debug, Serialize)]
+pub struct DriftEnvelope {
+    schema_version: u8,
+    device: CloudSource,
+    uploaded_at: DateTime<Utc>,
+    repos: Vec<CloudDriftRepo>,
+}
+
+#[derive(Debug, Serialize)]
+struct CloudDriftRepo {
+    identity: String,
+    name: String,
+    device: String,
+    score: f32,
+    direction: String,
+    risk: String,
+    compared_to: String,
+    remote_captured_at: DateTime<Utc>,
+    local_captured_at: DateTime<Utc>,
+}
+
+impl DriftEnvelope {
+    pub fn from_observations(
+        observations: &[crate::azusa::RecordedObservation],
+        source_id: &str,
+        uploaded_at: DateTime<Utc>,
+    ) -> Self {
+        Self {
+            schema_version: SCHEMA_VERSION,
+            device: CloudSource {
+                id: source_id.to_string(),
+                cli_version: env!("CARGO_PKG_VERSION"),
+            },
+            uploaded_at,
+            repos: observations
+                .iter()
+                .map(|observation| CloudDriftRepo {
+                    identity: observation.identity.clone(),
+                    name: observation.name.clone(),
+                    device: observation.snapshot.device.clone(),
+                    score: observation.snapshot.score,
+                    direction: observation.snapshot.direction.clone(),
+                    risk: observation.snapshot.risk.clone(),
+                    compared_to: observation.snapshot.compared_to.clone(),
+                    remote_captured_at: observation.remote_captured_at,
+                    local_captured_at: observation.snapshot.local_captured_at,
+                })
+                .collect(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

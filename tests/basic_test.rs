@@ -1743,6 +1743,9 @@ async fn full_pipeline_with_fixture_data() {
     config.allow_remote_analysis = true;
     config.groq_base_url = Some(format!("http://{}", addr));
     config.enable_kaptaind = false;
+    // Keep the pipeline hermetic: drift measurement shells out to azusa/git
+    // and touches the real user cache, which is covered by drift_test.
+    config.enable_drift = false;
     config.harnesses = vec![
         HarnessConfig {
             name: "chatgpt".into(),

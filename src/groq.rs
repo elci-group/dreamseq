@@ -177,12 +177,30 @@ struct AnthropicUsage {
 /// compatible; Anthropic's Messages API is shaped differently enough
 /// (`x-api-key` auth, a top-level `system` field, typed content blocks) to
 /// need its own dispatch — see `request_anthropic` in inference_transport.rs.
+/// Public so `config::ProviderSettings` (a manually-configured provider,
+/// persisted to disk by the `dreamseq config` TUI) can name it directly.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub(super) enum Protocol {
+pub enum Protocol {
     #[default]
     OpenAiCompatible,
     Anthropic,
+}
+
+impl Protocol {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::OpenAiCompatible => "openai_compatible",
+            Self::Anthropic => "anthropic",
+        }
+    }
+
+    pub fn toggled(&self) -> Self {
+        match self {
+            Self::OpenAiCompatible => Self::Anthropic,
+            Self::Anthropic => Self::OpenAiCompatible,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -205,25 +223,54 @@ struct InferenceOutput {
     model: String,
 }
 
+/// A completed batch's analysis plus which route actually served it. The
+/// server already relays this on every response (see `InferenceOutput`
+/// above); this struct carries it out of `analyze_prompt`/`attempt_route`
+/// so the caller can report it, instead of the provider/model being logged
+/// once via `tracing::info!` (invisible without `--verbose`) and discarded.
+struct BatchOutcome {
+    analysis: Analysis,
+    provider: String,
+    model: String,
+}
+
 #[derive(Clone)]
 pub struct GroqClient {
     client: Client,
     cloud: Option<Credentials>,
     routes: Vec<InferenceRoute>,
     health: Arc<inference_health::RouteHealth>,
+    /// Whether BYOK routes may be tried at all — set from
+    /// `DreamseqConfig::byok_fallback_enabled` so `dreamseq config` can turn
+    /// fallback off entirely (fail the batch instead of ever leaving the
+    /// cloud route) without touching any environment variable.
+    byok_fallback_enabled: bool,
 }
 
 impl GroqClient {
     pub fn new(api_key: &str) -> Result<Self> {
-        Self::new_routed(api_key, None)
+        Self::new_routed(api_key, None, &[], true)
     }
 
-    pub fn new_routed(api_key: &str, cloud: Option<Credentials>) -> Result<Self> {
+    /// Well-known providers the `dreamseq config` TUI can offer as quick-add
+    /// templates: name, base URL, default (heavy) model, and protocol.
+    pub fn known_provider_templates() -> Vec<(&'static str, &'static str, &'static str, Protocol)>
+    {
+        inference_providers::known_provider_templates()
+    }
+
+    pub fn new_routed(
+        api_key: &str,
+        cloud: Option<Credentials>,
+        configured_providers: &[crate::config::ProviderSettings],
+        byok_fallback_enabled: bool,
+    ) -> Result<Self> {
         Ok(Self {
             client: Client::builder().timeout(Duration::from_secs(90)).build()?,
             cloud,
-            routes: inference_providers::configured_byok_routes(api_key)?,
+            routes: inference_providers::configured_byok_routes(api_key, configured_providers)?,
             health: Arc::new(inference_health::RouteHealth::new()),
+            byok_fallback_enabled,
         })
     }
 
@@ -245,6 +292,7 @@ impl GroqClient {
                 protocol: Protocol::OpenAiCompatible,
             }],
             health: Arc::new(inference_health::RouteHealth::new()),
+            byok_fallback_enabled: true,
         })
     }
 
@@ -271,6 +319,7 @@ impl GroqClient {
                 protocol: Protocol::OpenAiCompatible,
             }],
             health: Arc::new(inference_health::RouteHealth::new()),
+            byok_fallback_enabled: true,
         })
     }
 
@@ -301,6 +350,7 @@ impl GroqClient {
                 })
                 .collect(),
             health: Arc::new(inference_health::RouteHealth::new()),
+            byok_fallback_enabled: true,
         })
     }
 
@@ -325,6 +375,7 @@ impl GroqClient {
                 protocol: Protocol::Anthropic,
             }],
             health: Arc::new(inference_health::RouteHealth::new()),
+            byok_fallback_enabled: true,
         })
     }
 
@@ -343,9 +394,9 @@ impl GroqClient {
         if segments.is_empty() {
             return Ok(Analysis::default());
         }
-        if self.cloud.is_none() && self.routes.is_empty() {
+        if self.cloud.is_none() && (!self.byok_fallback_enabled || self.routes.is_empty()) {
             anyhow::bail!(
-                "no inference route is available; pair with `dreamseq login`, set GROQ_API_KEY, or configure DREAMSEQ_BYOK_ROUTES"
+                "no inference route is available; pair with `dreamseq login`, run `dreamseq config` to add a provider, or set GROQ_API_KEY"
             );
         }
         let prompts = self.build_analysis_prompts(segments);
@@ -392,9 +443,20 @@ impl GroqClient {
             })?;
             completed += 1;
             match result {
-                Ok(batch) => {
+                Ok(outcome) => {
                     successful_batches += 1;
-                    combined.merge(batch);
+                    combined.merge(outcome.analysis);
+                    if total > 1 {
+                        crate::progress::stage(
+                            "✅",
+                            &format!(
+                                "[batch {}/{total}] completed via {}/{} — {completed}/{total} done",
+                                index + 1,
+                                outcome.provider,
+                                outcome.model,
+                            ),
+                        );
+                    }
                 }
                 Err(error) => {
                     tracing::warn!(
@@ -403,10 +465,16 @@ impl GroqClient {
                         error = %error,
                         "skipping malformed inference batch"
                     );
+                    if total > 1 {
+                        crate::progress::stage(
+                            "⚠️",
+                            &format!(
+                                "[batch {}/{total}] failed — {completed}/{total} done: {error}",
+                                index + 1
+                            ),
+                        );
+                    }
                 }
-            }
-            if total > 1 {
-                crate::progress::stage("🧠", &format!("  {completed}/{total} batches complete..."));
             }
         }
         if successful_batches == 0 {
@@ -460,7 +528,7 @@ impl GroqClient {
         batch: usize,
         total: usize,
         trace_id: &str,
-    ) -> Result<Analysis> {
+    ) -> Result<BatchOutcome> {
         let complexity = BatchComplexity::of(prompt);
         let messages = vec![
             Message {
@@ -489,10 +557,6 @@ impl GroqClient {
                     "skipping cloud route: cooling down"
                 );
             } else {
-                crate::progress::stage(
-                    "  ☁️",
-                    &format!("[batch {batch}/{total}] Trying Dreamsequence cloud inference..."),
-                );
                 let request = InferenceRequest {
                     model: String::new(),
                     messages: messages.clone(),
@@ -505,7 +569,11 @@ impl GroqClient {
                         Ok(analysis) => {
                             self.health.record_success(Self::CLOUD_ROUTE);
                             tracing::info!(batch, total_batches = total, provider = %output.provider, model = %output.model, tokens_used = output.tokens_used, "Dreamsequence inference batch completed");
-                            return Ok(analysis);
+                            return Ok(BatchOutcome {
+                                analysis,
+                                provider: output.provider,
+                                model: output.model,
+                            });
                         }
                         Err(error) => {
                             tracing::warn!(batch, provider = "dreamsequence", error = %error, "server inference returned invalid analysis");
@@ -515,6 +583,10 @@ impl GroqClient {
                     Err(error) => {
                         let cooldown = self.record_route_failure(Self::CLOUD_ROUTE, &error);
                         tracing::warn!(batch, provider = "dreamsequence", error = %error, cooldown_ms = cooldown.as_millis(), "server inference request failed");
+                        crate::progress::stage(
+                            "  ❌",
+                            &format!("[batch {batch}/{total}] dreamsequence cloud failed: {error} — falling back to BYOK"),
+                        );
                         failures.push(format!("dreamsequence: {error}"));
                     }
                 }
@@ -524,6 +596,13 @@ impl GroqClient {
                     "Dreamsequence inference unavailable; trying BYOK routes"
                 );
             }
+        }
+
+        if !self.byok_fallback_enabled {
+            anyhow::bail!(
+                "cloud inference failed and BYOK fallback is disabled in `dreamseq config`: {}",
+                failures.join("; ")
+            );
         }
 
         let mut any_byok_attempted = false;
@@ -541,7 +620,7 @@ impl GroqClient {
                 .attempt_route(&route, batch, total, &messages, complexity, trace_id)
                 .await
             {
-                Ok(analysis) => return Ok(analysis),
+                Ok(outcome) => return Ok(outcome),
                 Err(error) => {
                     tracing::warn!(batch, route = %route.name, error = %error, "BYOK route attempt failed");
                     failures.push(error.to_string());
@@ -582,7 +661,7 @@ impl GroqClient {
                 .attempt_route(&route, batch, total, &messages, complexity, trace_id)
                 .await
             {
-                Ok(analysis) => return Ok(analysis),
+                Ok(outcome) => return Ok(outcome),
                 Err(error) => {
                     tracing::warn!(batch, route = %route.name, error = %error, "recovered BYOK route attempt failed");
                     failures.push(error.to_string());
@@ -602,8 +681,9 @@ impl GroqClient {
     /// route in its configured order — no route is a worse fit for those,
     /// so there's nothing to prefer. Ties keep the configured order too,
     /// which is itself already deliberate (explicit `DREAMSEQ_BYOK_ROUTES`
-    /// first, generic BYOK next, auto-detected named providers, legacy Groq
-    /// last — see inference_providers::configured_byok_routes).
+    /// first, generic BYOK next, providers configured via `dreamseq config`
+    /// next — which then supersedes auto-detected named providers entirely
+    /// — legacy Groq last — see inference_providers::configured_byok_routes).
     fn ranked_byok_routes(&self, complexity: BatchComplexity) -> Vec<InferenceRoute> {
         let mut ranked: Vec<&InferenceRoute> = self.routes.iter().collect();
         if complexity == BatchComplexity::Light {
@@ -620,7 +700,7 @@ impl GroqClient {
         messages: &[Message],
         complexity: BatchComplexity,
         trace_id: &str,
-    ) -> Result<Analysis> {
+    ) -> Result<BatchOutcome> {
         crate::progress::stage(
             "  🔀",
             &format!(
@@ -677,7 +757,11 @@ impl GroqClient {
                 Ok(analysis) => {
                     self.health.record_success(&route.name);
                     tracing::info!(batch, total_batches = total, provider = %output.provider, model = %output.model, tokens_used = output.tokens_used, "BYOK inference batch completed");
-                    Ok(analysis)
+                    Ok(BatchOutcome {
+                        analysis,
+                        provider: output.provider,
+                        model: output.model,
+                    })
                 }
                 Err(error) => {
                     tracing::warn!(batch, provider = %route.name, error = %error, "BYOK inference returned invalid analysis");
@@ -687,6 +771,10 @@ impl GroqClient {
             Err(error) => {
                 let cooldown = self.record_route_failure(&route.name, &error);
                 tracing::warn!(batch, provider = %route.name, error = %error, cooldown_ms = cooldown.as_millis(), "BYOK inference request failed");
+                crate::progress::stage(
+                    "  ❌",
+                    &format!("[batch {batch}/{total}] {}: {error}", route.name),
+                );
                 anyhow::bail!("{}: {error}", route.name)
             }
         }

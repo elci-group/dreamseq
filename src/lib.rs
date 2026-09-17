@@ -2,10 +2,14 @@
 // SPDX-License-Identifier: MIT
 pub mod aggregator;
 pub mod analysis;
+pub mod azusa;
 pub mod bound;
 pub mod cloud;
 pub mod color;
 pub mod config;
+pub mod config_tui;
+pub mod devtools;
+mod devtools_registry;
 pub(crate) mod fs_security;
 pub mod groq;
 pub mod kaptaind;
@@ -16,6 +20,7 @@ pub mod progress;
 pub mod report;
 mod report_persistence;
 pub mod segmentation;
+pub mod stack_report;
 pub mod steering;
 pub mod telemetry;
 pub(crate) mod text_similarity;
@@ -47,6 +52,7 @@ pub struct Dreamseq {
     steering_detector: SteeringDetector,
     trend_analyzer: TrendAnalyzer,
     kaptaind_monitor: Option<KaptaindMonitor>,
+    last_drift_observations: Option<Vec<crate::azusa::RecordedObservation>>,
 }
 
 impl Dreamseq {
@@ -54,7 +60,9 @@ impl Dreamseq {
         let groq_client = if let Some(base_url) = &config.groq_base_url {
             GroqClient::new_with_url(&config.groq_api_key, base_url)?
         } else {
-            let cloud = if std::env::var("DREAMSEQ_DISABLE_CLOUD_INFERENCE").as_deref() == Ok("1") {
+            let cloud = if !config.cloud_inference_enabled
+                || std::env::var("DREAMSEQ_DISABLE_CLOUD_INFERENCE").as_deref() == Ok("1")
+            {
                 None
             } else {
                 match crate::cloud::CredentialStore::discover()
@@ -67,7 +75,12 @@ impl Dreamseq {
                     }
                 }
             };
-            GroqClient::new_routed(&config.groq_api_key, cloud)?
+            GroqClient::new_routed(
+                &config.groq_api_key,
+                cloud,
+                &config.providers,
+                config.byok_fallback_enabled,
+            )?
         };
         let anthologies_dir = config.anthologies_dir.clone();
 
@@ -87,7 +100,16 @@ impl Dreamseq {
             steering_detector: SteeringDetector::new(),
             trend_analyzer: TrendAnalyzer::with_directory(anthologies_dir),
             kaptaind_monitor,
+            last_drift_observations: None,
         })
+    }
+
+    /// Drift observations recorded by the most recent pipeline run, ready
+    /// for cloud upload. `None` until a run has completed; empty when drift
+    /// measurement recorded nothing (disabled, or azusa unavailable).
+    #[must_use]
+    pub fn last_drift_observations(&self) -> Option<&[crate::azusa::RecordedObservation]> {
+        self.last_drift_observations.as_deref()
     }
 
     /// Run the complete Dreamseq pipeline
@@ -214,7 +236,39 @@ impl Dreamseq {
                     progress::progress("Kaptaind analysis done");
                     tracing::info!(analysis, "Kaptaind analysis completed");
                 }
-                Err(error) => tracing::warn!(error = %error, "Kaptaind analysis was unavailable"),
+                Err(error) => tracing::warn!(error = %error, "kaptaind analysis was unavailable"),
+            }
+        }
+
+        // Step 10: Measure repository drift (azusa) across every locally
+        // available repo and remember the fresh observations for upload.
+        // Best-effort: a missing azusa or an unscannable repo never fails
+        // the run.
+        if self.config.enable_drift {
+            progress::stage("🧭", "Measuring repository drift...");
+            let repo = std::env::current_dir()?;
+            match crate::azusa::measure_repos(&self.config, std::slice::from_ref(&repo)) {
+                Ok(measurement) => {
+                    for warning in &measurement.warnings {
+                        progress::progress(&format!("⚠️ {warning}"));
+                        // Expected conditions (e.g. azusa not installed) land
+                        // here, so keep them at info: a `warn` would print on
+                        // stdout and corrupt `dreamseq run --json` output.
+                        tracing::info!(warning = %warning, "drift measurement note");
+                    }
+                    progress::progress(&format!(
+                        "Drift measured for {} repo(s)",
+                        measurement.observations.len()
+                    ));
+                    tracing::info!(
+                        observations = measurement.observations.len(),
+                        "measured repository drift with azusa"
+                    );
+                    self.last_drift_observations = Some(measurement.observations);
+                }
+                Err(error) => {
+                    tracing::warn!(error = %error, "drift measurement was unavailable")
+                }
             }
         }
 

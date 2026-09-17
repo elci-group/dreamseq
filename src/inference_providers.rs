@@ -2,10 +2,12 @@
 // SPDX-License-Identifier: MIT
 //! Builds the list of BYOK routes a `GroqClient` will use: explicit
 //! `DREAMSEQ_BYOK_ROUTES` JSON, the single-route `DREAMSEQ_BYOK_*` shorthand,
-//! and auto-detected named providers (OpenAI, Anthropic, Gemini, Grok,
-//! z.ai, Mistral, DeepSeek, OpenRouter, Cerebras, and local Ollama/LM
-//! Studio/vLLM) that activate the moment their API key appears in the
-//! environment — mirroring the legacy `GROQ_API_KEY` auto-detection.
+//! providers configured through the `dreamseq config` TUI (`config.providers`
+//! — see `crate::config::ProviderSettings`), and — only when none of those
+//! are configured — auto-detected named providers (OpenAI, Anthropic,
+//! Gemini, Grok, z.ai, Mistral, DeepSeek, OpenRouter, Cerebras, and local
+//! Ollama/LM Studio/vLLM) that activate the moment their API key appears in
+//! the environment, mirroring the legacy `GROQ_API_KEY` auto-detection.
 
 use super::{InferenceRoute, Protocol};
 use anyhow::Result;
@@ -22,7 +24,10 @@ struct ByokRouteConfig {
     protocol: Protocol,
 }
 
-pub(super) fn configured_byok_routes(legacy_groq_key: &str) -> Result<Vec<InferenceRoute>> {
+pub(super) fn configured_byok_routes(
+    legacy_groq_key: &str,
+    configured_providers: &[crate::config::ProviderSettings],
+) -> Result<Vec<InferenceRoute>> {
     let mut routes = Vec::new();
     if let Ok(encoded) = std::env::var("DREAMSEQ_BYOK_ROUTES")
         && !encoded.trim().is_empty()
@@ -84,7 +89,61 @@ pub(super) fn configured_byok_routes(legacy_groq_key: &str) -> Result<Vec<Infere
         });
     }
 
-    add_named_provider_routes(&mut routes);
+    // Providers configured explicitly via `dreamseq config` are a deliberate,
+    // ordered hierarchy set by the user — that supersedes the implicit
+    // env-var auto-detection below entirely, rather than merging with it, so
+    // there's only ever one source of truth for "which providers are active
+    // and in what order" once someone has configured any.
+    let manual_providers_configured = !configured_providers.is_empty();
+    for provider in configured_providers {
+        if !provider.enabled {
+            continue;
+        }
+        if routes
+            .iter()
+            .any(|route| route.base_url == provider.base_url)
+        {
+            tracing::warn!(
+                provider = %provider.name,
+                "skipping configured provider: base URL already routed"
+            );
+            continue;
+        }
+        validate_provider_url(&provider.base_url)?;
+        let api_key = if !provider.api_key.trim().is_empty() {
+            provider.api_key.clone()
+        } else if let Some(key) = NAMED_PROVIDERS
+            .iter()
+            .find(|named| named.name == provider.name)
+            .and_then(|named| first_nonempty_env(named.api_key_env))
+        {
+            // No key stored in config for this well-known provider — fall
+            // back to its environment variable(s) so existing env-based
+            // setups keep working even after the user opens the config TUI.
+            key
+        } else {
+            tracing::warn!(
+                provider = %provider.name,
+                "skipping configured provider: no API key stored and none found in environment"
+            );
+            continue;
+        };
+        routes.push(InferenceRoute {
+            name: provider.name.clone(),
+            base_url: provider.base_url.trim_end_matches('/').to_string(),
+            model: provider.model.clone(),
+            api_key,
+            light_model: provider
+                .light_model
+                .clone()
+                .filter(|value| !value.trim().is_empty()),
+            protocol: provider.protocol,
+        });
+    }
+
+    if !manual_providers_configured {
+        add_named_provider_routes(&mut routes);
+    }
 
     if !legacy_groq_key.trim().is_empty()
         && !routes
@@ -238,6 +297,26 @@ const NAMED_PROVIDERS: &[NamedProvider] = &[
         protocol: Protocol::OpenAiCompatible,
     },
 ];
+
+/// Metadata for the `dreamseq config` TUI to offer as quick-add templates:
+/// name, base URL, default (heavy) model, and protocol for each well-known
+/// provider. Deliberately excludes `api_key_env`/`model_env` — the TUI
+/// stores the key and model the user enters directly in `ProviderSettings`
+/// rather than pointing back at an environment variable.
+pub(super) fn known_provider_templates() -> Vec<(&'static str, &'static str, &'static str, Protocol)>
+{
+    NAMED_PROVIDERS
+        .iter()
+        .map(|provider| {
+            (
+                provider.name,
+                provider.base_url,
+                provider.default_model,
+                provider.protocol,
+            )
+        })
+        .collect()
+}
 
 fn first_nonempty_env(names: &[&str]) -> Option<String> {
     names.iter().find_map(|name| {
@@ -543,6 +622,78 @@ mod tests {
             add_named_provider_routes(&mut routes);
             assert_eq!(routes.len(), 1);
             assert_eq!(routes[0].name, "custom-openai");
+        });
+    }
+
+    fn provider(name: &str, enabled: bool, api_key: &str) -> crate::config::ProviderSettings {
+        crate::config::ProviderSettings {
+            name: name.to_string(),
+            enabled,
+            base_url: format!("https://{name}.example/v1"),
+            model: "test-model".to_string(),
+            light_model: None,
+            api_key: api_key.to_string(),
+            protocol: Protocol::OpenAiCompatible,
+        }
+    }
+
+    #[test]
+    fn configured_providers_supersede_env_auto_detection_entirely() {
+        with_env(&[("OPENAI_API_KEY", Some("env-openai-key"))], || {
+            let providers = vec![provider("custom", true, "stored-key")];
+            let routes = configured_byok_routes("", &providers).unwrap();
+            let names: Vec<&str> = routes.iter().map(|route| route.name.as_str()).collect();
+            // Only the manually configured provider is present — the
+            // OPENAI_API_KEY in the environment is not auto-detected once
+            // any provider has been configured explicitly.
+            assert_eq!(names, vec!["custom"]);
+            assert_eq!(routes[0].api_key, "stored-key");
+        });
+    }
+
+    #[test]
+    fn disabled_configured_providers_are_skipped() {
+        with_env(&[], || {
+            let providers = vec![
+                provider("enabled-one", true, "key-1"),
+                provider("disabled-one", false, "key-2"),
+            ];
+            let routes = configured_byok_routes("", &providers).unwrap();
+            let names: Vec<&str> = routes.iter().map(|route| route.name.as_str()).collect();
+            assert_eq!(names, vec!["enabled-one"]);
+        });
+    }
+
+    #[test]
+    fn configured_provider_order_is_preserved_as_the_priority_hierarchy() {
+        with_env(&[], || {
+            let providers = vec![
+                provider("first", true, "key-1"),
+                provider("second", true, "key-2"),
+            ];
+            let routes = configured_byok_routes("", &providers).unwrap();
+            let names: Vec<&str> = routes.iter().map(|route| route.name.as_str()).collect();
+            assert_eq!(names, vec!["first", "second"]);
+        });
+    }
+
+    #[test]
+    fn a_blank_stored_key_falls_back_to_that_providers_environment_variable() {
+        with_env(&[("OPENAI_API_KEY", Some("env-openai-key"))], || {
+            let mut named_openai = provider("openai", true, "");
+            named_openai.base_url = "https://api.openai.com/v1".to_string();
+            let routes = configured_byok_routes("", &[named_openai]).unwrap();
+            assert_eq!(routes.len(), 1);
+            assert_eq!(routes[0].api_key, "env-openai-key");
+        });
+    }
+
+    #[test]
+    fn a_configured_provider_with_no_key_anywhere_is_skipped_not_errored() {
+        with_env(&[], || {
+            let providers = vec![provider("custom", true, "")];
+            let routes = configured_byok_routes("", &providers).unwrap();
+            assert!(routes.is_empty());
         });
     }
 }
