@@ -12,8 +12,9 @@
 
 use crate::color::Colorize;
 use crate::devtools::{self, DetectedTool};
+use crate::stack_probe;
 use anyhow::Result;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::Path;
@@ -140,12 +141,17 @@ const AGENT_HARNESSES: &[HarnessDef] = &[
 ];
 const HARNESS_CAP: usize = 200;
 
-/// One detected agent harness.
-#[derive(Debug, Clone, Serialize)]
+/// One detected agent harness. `probe` carries the capability evidence from
+/// [`stack_probe`]; it is omitted from JSON entirely when probing produced
+/// nothing (e.g. a probe error), so payloads stay compatible with consumers
+/// written before probes existed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HarnessInfo {
     pub name: String,
     pub version: Option<String>,
     pub origin: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub probe: Option<stack_probe::HarnessProbe>,
 }
 
 /// Probe an executable's version for a harness: the first non-empty line of
@@ -201,10 +207,19 @@ pub async fn detect_harnesses() -> Vec<HarnessInfo> {
             Some(exe) => harness_binary_version(exe).await,
             None => None,
         };
+        // Capability probe: best-effort by construction (see `stack_probe`),
+        // so this never fails detection — worst case the probe reports
+        // `status: "detected"` with empty provider lists.
+        let probe = Some(stack_probe::probe_harness(
+            def.name,
+            None,
+            &stack_probe::tcp_connector,
+        ));
         harnesses.push(HarnessInfo {
             name: def.name.to_string(),
             version,
             origin: resolved.or(marker),
+            probe,
         });
     }
     harnesses.sort_by(|a, b| a.name.cmp(&b.name));
@@ -546,6 +561,13 @@ pub fn detect_specs() -> Specs {
 // Command orchestration
 // ---------------------------------------------------------------------------
 
+/// Identifies this CLI as the report's source, distinct from the retired
+/// `dreamcred` tool (which never sent this field). The Dreamsequence API
+/// only offers remote-triggered stack-report updates ("upon next contact")
+/// to devices whose most recent report carries this marker, since there is
+/// no way to make an unrecognized or legacy client honour such a request.
+pub const REPORTER: &str = "dreamseq";
+
 /// Full stack-report payload: specs, agent harnesses, and detected dev tools.
 #[derive(Debug, Clone, Serialize)]
 pub struct StackReportPayload {
@@ -553,6 +575,7 @@ pub struct StackReportPayload {
     pub specs: Specs,
     pub harnesses: Vec<HarnessInfo>,
     pub tools: Vec<DetectedTool>,
+    pub reporter: &'static str,
 }
 
 /// Comma-separated devtools registry batch list, e.g. `"1,2,3"`.
@@ -566,6 +589,35 @@ pub fn parse_batches(value: &str) -> Result<HashSet<u32>, String> {
                 .map_err(|_| format!("invalid batch list: {value:?}"))
         })
         .collect()
+}
+
+/// "Upon next contact" scheduling, exercised by `dreamseq run`: this
+/// codebase has no way to push a request to a device, so instead every
+/// paired device checks in here and submits a fresh report itself if one is
+/// due — either because a workspace member requested a remote update via
+/// the dashboard, or because this device was just paired and has never
+/// reported at all (mandatory first-contact reporting; see also the
+/// unconditional report `dreamseq login` submits right after pairing, which
+/// this call would otherwise duplicate on the very next `run`).
+///
+/// Returns `Ok(None)` when this device is not paired (nothing to check),
+/// `Ok(Some(true))` when a report was due and has just been submitted, or
+/// `Ok(Some(false))` when nothing was due.
+pub async fn check_in_if_paired(trace_id: &str) -> Result<Option<bool>> {
+    let Some(credentials) =
+        crate::cloud::CredentialStore::discover().and_then(|store| store.load_optional())?
+    else {
+        return Ok(None);
+    };
+    let client = crate::cloud::CloudClient::new(Some(&credentials.api_url))?;
+    if !client
+        .report_status_with_trace_id(&credentials, trace_id)
+        .await?
+    {
+        return Ok(Some(false));
+    }
+    run_stack_report(false, false, None).await?;
+    Ok(Some(true))
 }
 
 /// Run `dreamseq stack-report`: compose the payload and either print it
@@ -582,6 +634,7 @@ pub async fn run_stack_report(
         specs,
         harnesses,
         tools,
+        reporter: REPORTER,
     };
 
     if dry_run {
@@ -656,5 +709,19 @@ mod tests {
     async fn detect_harnesses_stays_within_the_cap() {
         let harnesses = detect_harnesses().await;
         assert!(harnesses.len() <= HARNESS_CAP);
+    }
+
+    #[tokio::test]
+    async fn detected_harnesses_carry_a_serialized_probe() {
+        let harnesses = detect_harnesses().await;
+        for harness in &harnesses {
+            let json = serde_json::to_value(harness).unwrap();
+            // Every detected harness gets a probe; unknown-evidence probes
+            // degrade to "detected" but are still present.
+            assert_eq!(
+                json["probe"]["status"],
+                harness.probe.as_ref().unwrap().status
+            );
+        }
     }
 }

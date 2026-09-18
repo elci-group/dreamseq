@@ -254,8 +254,7 @@ impl GroqClient {
 
     /// Well-known providers the `dreamseq config` TUI can offer as quick-add
     /// templates: name, base URL, default (heavy) model, and protocol.
-    pub fn known_provider_templates() -> Vec<(&'static str, &'static str, &'static str, Protocol)>
-    {
+    pub fn known_provider_templates() -> Vec<(&'static str, &'static str, &'static str, Protocol)> {
         inference_providers::known_provider_templates()
     }
 
@@ -585,7 +584,9 @@ impl GroqClient {
                         tracing::warn!(batch, provider = "dreamsequence", error = %error, cooldown_ms = cooldown.as_millis(), "server inference request failed");
                         crate::progress::stage(
                             "  ❌",
-                            &format!("[batch {batch}/{total}] dreamsequence cloud failed: {error} — falling back to BYOK"),
+                            &format!(
+                                "[batch {batch}/{total}] dreamsequence cloud failed: {error} — falling back to BYOK"
+                            ),
                         );
                         failures.push(format!("dreamsequence: {error}"));
                     }

@@ -84,15 +84,18 @@ impl AzusaClient {
         match output.status.code() {
             Some(4) | Some(5) => {
                 let stderr = String::from_utf8_lossy(&output.stderr);
-                anyhow::bail!("azusa could not analyze {}: {}", repo.display(), stderr.trim());
+                anyhow::bail!(
+                    "azusa could not analyze {}: {}",
+                    repo.display(),
+                    stderr.trim()
+                );
             }
             Some(_) => {}
             None => anyhow::bail!("azusa was terminated while analyzing {}", repo.display()),
         }
 
-        let report: AzusaDriftReport = serde_json::from_slice(&output.stdout).with_context(
-            || format!("parsing azusa drift report for {}", repo.display()),
-        )?;
+        let report: AzusaDriftReport = serde_json::from_slice(&output.stdout)
+            .with_context(|| format!("parsing azusa drift report for {}", repo.display()))?;
         if report.schema_version != 1 {
             anyhow::bail!(
                 "unsupported azusa report schema_version {} (expected 1); upgrade dreamseq or pin AZUSA_BINARY to a matching azusa build",
@@ -290,13 +293,16 @@ pub fn record_observation(
     local_captured_at: DateTime<Utc>,
     remote_captured_at: DateTime<Utc>,
 ) {
-    let entry = cache.repos.entry(identity.clone()).or_insert_with(|| RepoDriftEntry {
-        identity: identity.clone(),
-        name: name.clone(),
-        local_path: None,
-        remote_captured_at: None,
-        locals: Vec::new(),
-    });
+    let entry = cache
+        .repos
+        .entry(identity.clone())
+        .or_insert_with(|| RepoDriftEntry {
+            identity: identity.clone(),
+            name: name.clone(),
+            local_path: None,
+            remote_captured_at: None,
+            locals: Vec::new(),
+        });
     entry.name = name;
     if let Some(path) = local_path {
         entry.local_path = Some(path);
@@ -414,10 +420,12 @@ fn scan_repo(
 pub fn local_scan_candidates(cache: &DriftCache, extra_dirs: &[PathBuf]) -> Vec<PathBuf> {
     let mut seen = std::collections::HashSet::new();
     let mut candidates = Vec::new();
-    for dir in extra_dirs
-        .iter()
-        .chain(cache.repos.values().filter_map(|entry| entry.local_path.as_ref()))
-    {
+    for dir in extra_dirs.iter().chain(
+        cache
+            .repos
+            .values()
+            .filter_map(|entry| entry.local_path.as_ref()),
+    ) {
         let Ok(canonical) = dir.canonicalize() else {
             continue;
         };
@@ -450,9 +458,10 @@ pub fn measure_repos(config: &DreamseqConfig, extra_dirs: &[PathBuf]) -> Result<
     for repo in local_scan_candidates(&cache, extra_dirs) {
         match scan_repo(&client, &mut cache, config, &repo) {
             Ok(observation) => measurement.observations.push(observation),
-            Err(error) => measurement
-                .warnings
-                .push(format!("could not measure drift in {}: {error}", repo.display())),
+            Err(error) => measurement.warnings.push(format!(
+                "could not measure drift in {}: {error}",
+                repo.display()
+            )),
         }
     }
     if !measurement.observations.is_empty() {
@@ -610,7 +619,11 @@ pub fn view_entry(entry: &RepoDriftEntry, tier: AccountTier) -> RepoDriftView {
 
 /// Tier-limited view of the whole cache.
 pub fn view_cache(cache: &DriftCache, tier: AccountTier) -> Vec<RepoDriftView> {
-    cache.repos.values().map(|entry| view_entry(entry, tier)).collect()
+    cache
+        .repos
+        .values()
+        .map(|entry| view_entry(entry, tier))
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -668,7 +681,11 @@ pub fn render_human(views: &[RepoDriftView], tier: AccountTier) -> String {
             out.push_str(&format!(
                 "  local across {} {} (as of {}) · drift score {} · {}\n",
                 average.devices,
-                if average.devices == 1 { "device" } else { "devices" },
+                if average.devices == 1 {
+                    "device"
+                } else {
+                    "devices"
+                },
                 fmt_time(average.local_captured_at),
                 score_style(average.score),
                 "enterprise average".dimmed()

@@ -20,6 +20,7 @@ pub mod progress;
 pub mod report;
 mod report_persistence;
 pub mod segmentation;
+pub mod stack_probe;
 pub mod stack_report;
 pub mod steering;
 pub mod telemetry;
@@ -195,7 +196,10 @@ impl Dreamseq {
         // Step 6: Detect user steering
         progress::stage("🧭", "Detecting steering events...");
         let steering_events = self.steering_detector.detect(&segments)?;
-        progress::progress(&format!("Detected {} steering events", steering_events.len()));
+        progress::progress(&format!(
+            "Detected {} steering events",
+            steering_events.len()
+        ));
         tracing::info!(
             steering_events = steering_events.len(),
             "detected steering events"

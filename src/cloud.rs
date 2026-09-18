@@ -18,8 +18,8 @@ mod cloud_envelope;
 mod cloud_protocol;
 #[path = "cloud_sync.rs"]
 mod cloud_sync;
-pub use cloud_envelope::RunEnvelope;
 use cloud_envelope::DriftEnvelope;
+pub use cloud_envelope::RunEnvelope;
 pub use cloud_protocol::DeviceAuthorization;
 use cloud_protocol::{DevicePoll, DeviceToken, parse_response};
 pub use cloud_sync::SyncSummary;
@@ -305,6 +305,32 @@ impl CloudClient {
             .await?;
         parse_response(response, trace_id).await
     }
+
+    /// "Upon next contact" scheduling, the pull side: ask whether a
+    /// workspace member has requested a fresh stack report for this device
+    /// (see `stack_report::maybe_fulfill_pending_request`). There is no way
+    /// to push such a request to a device, so dreamseq checks this on every
+    /// `run` instead.
+    #[tracing::instrument(skip_all, fields(trace_id = %trace_id))]
+    pub async fn report_status_with_trace_id(
+        &self,
+        credentials: &Credentials,
+        trace_id: &str,
+    ) -> Result<bool> {
+        let response = self
+            .http
+            .get(format!("{}/api/v1/device/report/status", self.base_url))
+            .bearer_auth(&credentials.access_token)
+            .send()
+            .await?;
+        let status: ReportDueStatus = parse_response(response, trace_id).await?;
+        Ok(status.due)
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct ReportDueStatus {
+    due: bool,
 }
 
 fn normalize_api_url(value: String) -> Result<String> {

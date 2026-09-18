@@ -120,6 +120,24 @@ enum Commands {
         #[arg(long, value_parser = dreamseq::stack_report::parse_batches)]
         batches: Option<std::collections::HashSet<u32>>,
     },
+    /// 🔎 Probe agent harnesses for provider/model/auth capability evidence
+    Stack {
+        #[command(subcommand)]
+        action: StackCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum StackCommands {
+    /// Probe one harness (default: every detected harness) for provider,
+    /// model, auth, and connectivity evidence — never fails on probe issues
+    Probe {
+        /// Harness name to probe (e.g. claude, codex, kimi); omit to probe all
+        harness: Option<String>,
+        /// Emit the probe entries as JSON instead of human-readable blocks
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 fn init_tracing(verbose: bool) {
@@ -159,6 +177,17 @@ async fn __curly_original_main() -> Result<()> {
             let saved_path = anthology.save()?;
             if let Err(error) = sync_if_paired(&anthology, &trace_id).await {
                 eprintln!("{} Cloud sync failed: {error}", "⚠️".yellow());
+            }
+            // "Upon next contact" remote stack-report scheduling: fulfil a
+            // pending request now if this device is paired and one exists.
+            match dreamseq::stack_report::check_in_if_paired(&trace_id).await {
+                Ok(Some(true)) => {
+                    tracing::info!("submitted a stack report requested from the dashboard")
+                }
+                Ok(Some(false)) | Ok(None) => {}
+                Err(error) => {
+                    eprintln!("{} Stack-report check-in failed: {error}", "⚠️".yellow())
+                }
             }
             if let Some(observations) = dreamseq.last_drift_observations()
                 && !observations.is_empty()
@@ -227,6 +256,16 @@ async fn __curly_original_main() -> Result<()> {
                 "✅".green(),
                 credentials.account_id.cyan()
             );
+            // Mandatory first-contact reporting: every newly onboarded
+            // device submits a stack report immediately, not just when a
+            // user happens to run `stack-report` or `run` later. Best-effort
+            // like every other post-pairing side effect in this codebase —
+            // a network hiccup here shouldn't fail an otherwise-successful
+            // pairing, and dreamseq run's own "upon next contact" check-in
+            // will retry it regardless.
+            if let Err(error) = dreamseq::stack_report::run_stack_report(false, false, None).await {
+                eprintln!("{} Initial stack report failed: {error}", "⚠️".yellow());
+            }
         }
         Commands::Logout => {
             init_tracing(false);
@@ -375,6 +414,12 @@ async fn __curly_original_main() -> Result<()> {
             init_tracing(false);
             dreamseq::stack_report::run_stack_report(dry_run, json, batches).await?;
         }
+        Commands::Stack { action } => match action {
+            StackCommands::Probe { harness, json } => {
+                init_tracing(false);
+                dreamseq::stack_probe::run_probe_command(harness, json).await?;
+            }
+        },
     }
 
     Ok(())

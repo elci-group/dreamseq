@@ -56,7 +56,10 @@ pub fn stage(emoji: &str, message: &str) {
     let sparkle_left = if stage_num > 0 { "✨ " } else { "" };
     let sparkle_right = " ✨";
 
-    eprintln!("{}{} {}{}", sparkle_left, colored_emoji, message, sparkle_right);
+    eprintln!(
+        "{}{} {}{}",
+        sparkle_left, colored_emoji, message, sparkle_right
+    );
 }
 
 /// Print a trippy progress update with animation
@@ -71,7 +74,10 @@ pub fn progress(message: &str) {
     let wave = WAVES[wave_idx];
     let rotation = ROTATION[rotation_idx];
 
-    let colored = colorize_stage(&format!("{} {} {} {}", spinner, rotation, message, wave), stage_num);
+    let colored = colorize_stage(
+        &format!("{} {} {} {}", spinner, rotation, message, wave),
+        stage_num,
+    );
     eprintln!("  {}", colored);
 }
 

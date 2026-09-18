@@ -16,21 +16,27 @@
 
 use crate::devtools_registry::TOOLS;
 use regex::Regex;
-use serde::Serialize;
-use std::collections::{HashMap, HashSet};
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tokio::sync::Semaphore;
 
 /// One detected developer tool, ready to serialize into the stack report.
-#[derive(Debug, Clone, Serialize)]
+/// `state` carries functional evidence (daemon up, authenticated, reachable,
+/// configured) for the small allowlist of tools `probe_tool_state` knows how
+/// to exercise; it is omitted entirely when no probe applied or succeeded, so
+/// payloads stay compatible with consumers written before state existed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DetectedTool {
     pub key: String,
     pub name: String,
     pub category: String,
     pub version: Option<String>,
     pub origin: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<BTreeMap<String, String>>,
 }
 
 /// Default cap on tools returned, matching dreamcred's `detect_devtools(cap=500)`.
@@ -39,6 +45,15 @@ pub const DEFAULT_CAP: usize = 500;
 const MAX_CONCURRENT_PROBES: usize = 8;
 const VERSION_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 const PACKAGE_QUERY_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Registry keys that get a functional state probe after detection (matched
+/// case-insensitively on the key). Each probe is non-interactive, bounded by
+/// `STATE_PROBE_TIMEOUT`, and silent on failure — state is evidence, not a
+/// verdict.
+const STATE_PROBE_KEYS: &[&str] = &["docker", "gh", "postgresql", "git"];
+const STATE_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
+/// Cap on `state` entries per tool; truncate rather than error.
+const STATE_MAX_ENTRIES: usize = 8;
 
 /// Resolve `binary` on `PATH`, mirroring Python's `shutil.which` closely
 /// enough for detection purposes: an explicit path is checked directly,
@@ -116,6 +131,156 @@ async fn run_output(command: &str, args: &[&str], timeout: Duration) -> Option<(
         output.status.success(),
         String::from_utf8_lossy(&output.stdout).into_owned(),
     ))
+}
+
+/// Like [`run_output`], but merges stderr into the returned output. Tools
+/// whose status commands report to stderr (e.g. `gh auth status`) need the
+/// combined stream for parsing; callers that need stdout only should use
+/// `run_output`.
+async fn run_output_merged(
+    command: &str,
+    args: &[&str],
+    timeout: Duration,
+) -> Option<(bool, String)> {
+    let child = tokio::process::Command::new(command)
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .ok()?;
+    let output = tokio::time::timeout(timeout, async { child.wait_with_output().await })
+        .await
+        .ok()?
+        .ok()?;
+    let merged = [output.stdout.as_slice(), output.stderr.as_slice()].concat();
+    Some((
+        output.status.success(),
+        String::from_utf8_lossy(&merged).into_owned(),
+    ))
+}
+
+// ---------------------------------------------------------------------------
+// Functional state probes
+// ---------------------------------------------------------------------------
+
+/// Docker state: `docker info` succeeding means the daemon is up; the
+/// SecurityOptions section mentions `rootless` when the daemon runs rootless.
+fn docker_state_from_info(info: &str) -> BTreeMap<String, String> {
+    let mut state = BTreeMap::new();
+    state.insert("daemon".to_string(), "yes".to_string());
+    state.insert("running".to_string(), "yes".to_string());
+    state.insert(
+        "rootless".to_string(),
+        if info.to_lowercase().contains("rootless") {
+            "yes"
+        } else {
+            "no"
+        }
+        .to_string(),
+    );
+    state
+}
+
+async fn probe_docker_state() -> Option<BTreeMap<String, String>> {
+    let (ok, stdout) = run_output("docker", &["info"], STATE_PROBE_TIMEOUT).await?;
+    ok.then(|| docker_state_from_info(&stdout))
+}
+
+/// GitHub CLI state: `gh auth status` exits zero when authenticated and names
+/// the account; anything else means no usable login.
+fn gh_state_from_status(success: bool, output: &str) -> BTreeMap<String, String> {
+    let mut state = BTreeMap::new();
+    if success {
+        state.insert("authenticated".to_string(), "yes".to_string());
+        static ACCOUNT_RE: OnceLock<Regex> = OnceLock::new();
+        let account_re =
+            ACCOUNT_RE.get_or_init(|| Regex::new(r"Logged in to github\.com as (\S+)").unwrap());
+        if let Some(captures) = account_re.captures(output) {
+            state.insert("account".to_string(), captures[1].to_string());
+        }
+    } else {
+        state.insert("authenticated".to_string(), "no".to_string());
+    }
+    state
+}
+
+async fn probe_gh_state() -> Option<BTreeMap<String, String>> {
+    let (ok, merged) = run_output_merged("gh", &["auth", "status"], STATE_PROBE_TIMEOUT).await?;
+    Some(gh_state_from_status(ok, &merged))
+}
+
+/// PostgreSQL state: `pg_isready` exit 0 means a server is accepting
+/// connections; 1 (rejecting) and 2 (no response) both mean a server exists
+/// but is not reachable right now. A spawn failure means we cannot tell and
+/// contributes nothing.
+fn postgres_state_from_exit(success: bool) -> BTreeMap<String, String> {
+    let mut state = BTreeMap::new();
+    state.insert("server".to_string(), "yes".to_string());
+    state.insert(
+        "reachable".to_string(),
+        if success { "yes" } else { "no" }.to_string(),
+    );
+    state
+}
+
+async fn probe_postgres_state() -> Option<BTreeMap<String, String>> {
+    let (ok, _) = run_output("pg_isready", &[], STATE_PROBE_TIMEOUT).await?;
+    Some(postgres_state_from_exit(ok))
+}
+
+/// Git state: `git config --get user.email` exits zero when an identity is
+/// configured and one when none is.
+async fn probe_git_state() -> Option<BTreeMap<String, String>> {
+    let (ok, _) = run_output(
+        "git",
+        &["config", "--get", "user.email"],
+        STATE_PROBE_TIMEOUT,
+    )
+    .await?;
+    Some(git_state_from_exit(ok))
+}
+
+/// Run the state probe for one registry key. Returns `None` for keys outside
+/// the allowlist and for any probe that could not produce evidence.
+async fn probe_tool_state(key: &str) -> Option<BTreeMap<String, String>> {
+    match key.to_lowercase().as_str() {
+        "docker" => probe_docker_state().await,
+        "gh" => probe_gh_state().await,
+        "postgresql" => probe_postgres_state().await,
+        "git" => probe_git_state().await,
+        _ => None,
+    }
+}
+
+/// Attach functional state to the detected tools that have a probe, running
+/// all probes concurrently. Probes are silent on failure: a tool keeps
+/// `state: None` when its probe yields nothing.
+async fn attach_tool_state(found: &mut [DetectedTool]) {
+    let mut set = tokio::task::JoinSet::new();
+    for tool in found.iter() {
+        if STATE_PROBE_KEYS.contains(&tool.key.to_lowercase().as_str()) {
+            let key = tool.key.clone();
+            set.spawn(async move { (key.clone(), probe_tool_state(&key).await) });
+        }
+    }
+    let mut states = HashMap::new();
+    while let Some(joined) = set.join_next().await {
+        if let Ok((key, state)) = joined {
+            states.insert(key, state);
+        }
+    }
+    for tool in found.iter_mut() {
+        tool.state = states.remove(&tool.key).and_then(|state| {
+            state.and_then(|map| {
+                // BTreeMap has no truncate: keep the first STATE_MAX_ENTRIES
+                // (lexicographic key order — deterministic) and drop the rest.
+                let capped: BTreeMap<String, String> =
+                    map.into_iter().take(STATE_MAX_ENTRIES).collect();
+                (!capped.is_empty()).then_some(capped)
+            })
+        });
+    }
 }
 
 /// Installed package names across whatever package managers exist on this
@@ -355,12 +520,23 @@ pub async fn detect_devtools(batches: Option<&HashSet<u32>>, cap: usize) -> Vec<
                 category: tool.category.to_string(),
                 version,
                 origin: candidate.origin,
+                state: None,
             }
         })
         .collect();
+    attach_tool_state(&mut found).await;
     found.sort_by(|a, b| a.name.cmp(&b.name));
     found.truncate(cap);
     found
+}
+
+fn git_state_from_exit(success: bool) -> BTreeMap<String, String> {
+    let mut state = BTreeMap::new();
+    state.insert(
+        "configured".to_string(),
+        if success { "yes" } else { "no" }.to_string(),
+    );
+    state
 }
 
 #[cfg(test)]
@@ -427,5 +603,71 @@ mod tests {
         let empty_batch: HashSet<u32> = [9999].into_iter().collect();
         let none_found = detect_devtools(Some(&empty_batch), DEFAULT_CAP).await;
         assert!(none_found.is_empty());
+    }
+
+    #[test]
+    fn docker_state_marks_rootless_from_security_options() {
+        let rootful = docker_state_from_info(" Security Options: apparmor seccomp cgroupns\n");
+        assert_eq!(rootful["daemon"], "yes");
+        assert_eq!(rootful["running"], "yes");
+        assert_eq!(rootful["rootless"], "no");
+
+        let rootless = docker_state_from_info(" Security Options: seccomp rootless\n");
+        assert_eq!(rootless["rootless"], "yes");
+    }
+
+    #[test]
+    fn gh_state_parses_account_and_distinguishes_anonymous() {
+        let logged_in = gh_state_from_status(
+            true,
+            "github.com\n  ✓ Logged in to github.com as octocool (oauth_token)\n",
+        );
+        assert_eq!(logged_in["authenticated"], "yes");
+        assert_eq!(logged_in["account"], "octocool");
+
+        let anonymous = gh_state_from_status(false, "");
+        assert_eq!(anonymous["authenticated"], "no");
+        assert!(!anonymous.contains_key("account"));
+    }
+
+    #[test]
+    fn postgres_state_maps_exit_codes_to_reachability() {
+        let accepting = postgres_state_from_exit(true);
+        assert_eq!(accepting["server"], "yes");
+        assert_eq!(accepting["reachable"], "yes");
+        // Exit 1 (rejecting) and 2 (no response) both mean: server present,
+        // not reachable right now.
+        let rejecting = postgres_state_from_exit(false);
+        assert_eq!(rejecting["server"], "yes");
+        assert_eq!(rejecting["reachable"], "no");
+    }
+
+    #[test]
+    fn git_state_maps_exit_code_to_configured() {
+        assert_eq!(git_state_from_exit(true)["configured"], "yes");
+        assert_eq!(git_state_from_exit(false)["configured"], "no");
+    }
+
+    #[test]
+    fn old_tool_payloads_without_state_still_round_trip() {
+        let legacy = r#"{"key": "git", "name": "Git", "category": "vcs", "version": "2.43.0", "origin": "/usr/bin/git"}"#;
+        let tool: DetectedTool = serde_json::from_str(legacy).unwrap();
+        assert!(tool.state.is_none());
+        let reserialized = serde_json::to_value(&tool).unwrap();
+        assert!(reserialized.get("state").is_none());
+
+        // And a probed tool keeps its (sorted, capped) state in JSON.
+        let mut state = BTreeMap::new();
+        state.insert("authenticated".to_string(), "yes".to_string());
+        let probed = DetectedTool {
+            key: "gh".to_string(),
+            name: "GitHub CLI".to_string(),
+            category: "vcs".to_string(),
+            version: None,
+            origin: None,
+            state: Some(state),
+        };
+        let json = serde_json::to_value(&probed).unwrap();
+        assert_eq!(json["state"]["authenticated"], "yes");
     }
 }

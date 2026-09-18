@@ -407,7 +407,10 @@ impl App {
                     ("○", Style::default().fg(Color::DarkGray))
                 };
                 let mut spans = vec![
-                    Span::styled(format!("  {}. ", index + 1), Style::default().fg(Color::DarkGray)),
+                    Span::styled(
+                        format!("  {}. ", index + 1),
+                        Style::default().fg(Color::DarkGray),
+                    ),
                     Span::styled(marker, marker_style),
                     Span::raw(" "),
                     Span::styled(provider.name.clone(), Style::default().fg(Color::Yellow)),
@@ -481,8 +484,7 @@ impl App {
                 self.config.allow_remote_analysis = !self.config.allow_remote_analysis
             }
             Row::AutoApproveRemoteAnalysis => {
-                self.config.auto_approve_remote_analysis =
-                    !self.config.auto_approve_remote_analysis
+                self.config.auto_approve_remote_analysis = !self.config.auto_approve_remote_analysis
             }
             Row::CloudInferenceEnabled => {
                 self.config.cloud_inference_enabled = !self.config.cloud_inference_enabled

@@ -57,7 +57,10 @@ fn pro_view_shows_up_to_four_individual_scores() {
 
     let pro = view_entry(&entry, AccountTier::Pro);
     assert_eq!(pro.locals.len(), 4);
-    assert!(pro.average.is_none(), "pro shows individual scores, not an average");
+    assert!(
+        pro.average.is_none(),
+        "pro shows individual scores, not an average"
+    );
 
     let free = view_entry(&entry, AccountTier::Free);
     assert_eq!(free.locals.len(), 1);
@@ -71,7 +74,10 @@ fn enterprise_view_averages_up_to_sixteen_scores() {
     let entry = entry_with(locals);
 
     let view = view_entry(&entry, AccountTier::Enterprise);
-    assert!(view.locals.is_empty(), "enterprise collapses to the average");
+    assert!(
+        view.locals.is_empty(),
+        "enterprise collapses to the average"
+    );
     let average = view.average.expect("enterprise average present");
     assert_eq!(average.devices, 16);
     assert!((average.score - 4.0).abs() < f32::EPSILON);
@@ -79,7 +85,11 @@ fn enterprise_view_averages_up_to_sixteen_scores() {
 
 #[test]
 fn enterprise_average_rounds_to_two_decimals() {
-    let locals = vec![snapshot("a", 1.0, 10), snapshot("b", 2.0, 5), snapshot("c", 2.0, 1)];
+    let locals = vec![
+        snapshot("a", 1.0, 10),
+        snapshot("b", 2.0, 5),
+        snapshot("c", 2.0, 1),
+    ];
     let view = view_entry(&entry_with(locals), AccountTier::Enterprise);
     assert!((view.average.expect("average").score - 1.67).abs() < 0.001);
 }
@@ -165,7 +175,10 @@ fn view_cache_covers_every_cached_repo() {
 
 #[test]
 fn device_name_prefers_config_then_hostname_then_placeholder() {
-    assert_eq!(resolve_device_name(Some("workstation"), Some("host")), "workstation");
+    assert_eq!(
+        resolve_device_name(Some("workstation"), Some("host")),
+        "workstation"
+    );
     assert_eq!(resolve_device_name(Some("  "), Some("host")), "host");
     assert_eq!(resolve_device_name(None, None), "unknown-device");
     assert_eq!(resolve_device_name(None, Some("host")), "host");
@@ -213,9 +226,9 @@ fn scan_candidates_dedup_skip_missing_and_skip_non_git_dirs() {
     let candidates = local_scan_candidates(
         &cache,
         &[
-            git_repo.clone(),               // duplicate of the cached path
-            root.join("does-not-exist"),    // missing on this device
-            plain_dir,                      // not a git worktree
+            git_repo.clone(),            // duplicate of the cached path
+            root.join("does-not-exist"), // missing on this device
+            plain_dir,                   // not a git worktree
         ],
     );
 
@@ -293,7 +306,10 @@ async fn drift_upload_posts_envelope_to_the_drift_endpoint() {
 
     let raw = rx.recv().expect("mock server captured the request");
     let (request_line, body) = raw.split_once('\n').expect("request line and body");
-    assert!(request_line.starts_with("POST /api/v1/drift "), "got: {request_line}");
+    assert!(
+        request_line.starts_with("POST /api/v1/drift "),
+        "got: {request_line}"
+    );
 
     let body: serde_json::Value = serde_json::from_str(body).expect("envelope is JSON");
     assert_eq!(body["schema_version"], 1);
@@ -304,6 +320,9 @@ async fn drift_upload_posts_envelope_to_the_drift_endpoint() {
     assert_eq!(repo["device"], "device-1");
     assert_eq!(repo["score"], 4.2);
     assert_eq!(repo["compared_to"], "origin/main");
-    assert!(repo.get("local_path").is_none(), "device-local paths are not uploaded");
+    assert!(
+        repo.get("local_path").is_none(),
+        "device-local paths are not uploaded"
+    );
     assert!(body.get("config").is_none());
 }
