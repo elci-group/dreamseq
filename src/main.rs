@@ -125,6 +125,37 @@ enum Commands {
         #[command(subcommand)]
         action: StackCommands,
     },
+    /// 🧭 Ingest Lucid agent sessions (lucid.session/v1)
+    Lucid {
+        #[command(subcommand)]
+        action: LucidCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum LucidCommands {
+    /// Fetch a project's session export since the last pull into a directory
+    /// that a `lucid_session` harness reads
+    Pull {
+        /// Lucid origin, e.g. https://lucid.dreamsequence.pro
+        #[arg(long)]
+        url: String,
+        /// Lucid project id
+        #[arg(long)]
+        project: String,
+        /// Output directory (the harness `log_path`)
+        #[arg(long)]
+        out: std::path::PathBuf,
+        /// Days to fetch on the first pull (at most 90)
+        #[arg(long, default_value = "7")]
+        days: i64,
+        /// Environment variable holding the Lucid bearer token
+        #[arg(long, default_value = "LUCID_API_TOKEN")]
+        token_env: String,
+        /// Emit the pull summary as JSON
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -418,6 +449,36 @@ async fn __curly_original_main() -> Result<()> {
             StackCommands::Probe { harness, json } => {
                 init_tracing(false);
                 dreamseq::stack_probe::run_probe_command(harness, json).await?;
+            }
+        },
+        Commands::Lucid { action } => match action {
+            LucidCommands::Pull {
+                url,
+                project,
+                out,
+                days,
+                token_env,
+                json,
+            } => {
+                init_tracing(false);
+                let summary = dreamseq::lucid::pull(&dreamseq::lucid::PullOptions {
+                    base_url: url,
+                    project_id: project,
+                    out_dir: out,
+                    initial_days: days,
+                    token_env,
+                })
+                .await?;
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&summary)?);
+                } else {
+                    println!(
+                        "Pulled {} Lucid event(s) into {} file(s); {} rejected.",
+                        summary.events,
+                        summary.files_written.len(),
+                        summary.rejected
+                    );
+                }
             }
         },
     }

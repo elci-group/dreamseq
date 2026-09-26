@@ -18,12 +18,13 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
 use std::io;
 
-const LOG_FORMATS: [LogFormat; 5] = [
+const LOG_FORMATS: [LogFormat; 6] = [
     LogFormat::Json,
     LogFormat::Markdown,
     LogFormat::Plain,
     LogFormat::CodexSqlite,
     LogFormat::Bound,
+    LogFormat::LucidSession,
 ];
 
 fn log_format_label(format: &LogFormat) -> &'static str {
@@ -33,6 +34,7 @@ fn log_format_label(format: &LogFormat) -> &'static str {
         LogFormat::Plain => "plain",
         LogFormat::CodexSqlite => "codex_sqlite",
         LogFormat::Bound => "bound",
+        LogFormat::LucidSession => "lucid_session",
     }
 }
 

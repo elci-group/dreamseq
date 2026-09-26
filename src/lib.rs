@@ -13,6 +13,7 @@ mod devtools_registry;
 pub(crate) mod fs_security;
 pub mod groq;
 pub mod kaptaind;
+pub mod lucid;
 pub mod normalization;
 pub mod patterns;
 pub mod present;

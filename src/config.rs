@@ -156,6 +156,9 @@ pub enum LogFormat {
     CodexSqlite,
     #[serde(alias = "Bound")]
     Bound,
+    /// Lucid `lucid.session/v1` exports (`*.jsonl`); see `crate::lucid`.
+    #[serde(alias = "LucidSession")]
+    LucidSession,
 }
 
 impl DreamseqConfig {

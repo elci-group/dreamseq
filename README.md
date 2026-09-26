@@ -30,6 +30,8 @@ partner program](docs/design-partner-program.md), and [pilot metrics](docs/pilot
 
 By mining patterns from your AI agent interactions across all harnesses, Dreamseq generates prioritized technical directives that inform the design of the next generation of tools and harnesses.
 
+Lucid agent sessions are ingested natively (`log_format: lucid_session`, `dreamseq lucid pull`); see [Ingesting Lucid agent sessions](docs/lucid-sessions.md).
+
 ---
 
 ## 🏗️ Architecture

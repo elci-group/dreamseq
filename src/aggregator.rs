@@ -187,6 +187,12 @@ impl LogAggregator {
         {
             match entry {
                 Ok(entry) if entry.file_type().is_file() => {
+                    if matches!(harness.log_format, crate::config::LogFormat::LucidSession)
+                        && entry.path().extension().is_none_or(|e| e != "jsonl")
+                    {
+                        // Only export files; skips pull state and partial files.
+                        continue;
+                    }
                     if is_binary_artifact(entry.path(), &harness.log_format) {
                         tracing::debug!(
                             harness = %harness.name,
@@ -226,6 +232,14 @@ impl LogAggregator {
             }
         }
 
+        if matches!(harness.log_format, crate::config::LogFormat::LucidSession) {
+            let duplicates = crate::lucid::dedupe_by_id(&mut entries);
+            if duplicates > 0 {
+                report.warnings.push(format!(
+                    "{duplicates} Lucid event(s) delivered more than once were collapsed"
+                ));
+            }
+        }
         report.entries_accepted = entries.len();
         (entries, report)
     }
@@ -245,6 +259,14 @@ impl LogAggregator {
                     }
                     crate::config::LogFormat::Plain => {
                         self.parse_plain_logs(&content, &harness.name, fallback_timestamp)
+                    }
+                    crate::config::LogFormat::LucidSession => {
+                        let (entries, rejected) =
+                            crate::lucid::parse_export(&content, &harness.name);
+                        if rejected > 0 && entries.is_empty() {
+                            anyhow::bail!("no lucid.session/v1 records ({rejected} rejected)");
+                        }
+                        Ok(entries)
                     }
                     crate::config::LogFormat::Bound => {
                         unreachable!("Bound harnesses are handled directly in aggregate_harness")
@@ -537,6 +559,51 @@ fn extract_inline_timestamp(line: &str, fallback: DateTime<Utc>) -> (DateTime<Ut
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn lucid_session_exports_collapse_redelivered_events() {
+        let dir = std::env::temp_dir().join(format!("dreamseq-lucid-agg-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let record = |id: &str| {
+            serde_json::json!({
+                "schema_version": "lucid.session/v1", "event_id": id, "tenant_id": "t",
+                "project_id": "p", "task_id": "task", "execution_id": "e", "attempt_id": "a",
+                "sequence": 1, "occurred_at": "2026-09-26T10:00:00Z", "kind": "tool.completed",
+                "agent": {"role": "implementer", "provider": "anthropic", "model": "m"},
+                "detail": {"tool": "read_file", "status": "failed"}, "payload_sha256": "ab"
+            })
+            .to_string()
+        };
+        // Two overlapping pulls both contain ev2.
+        std::fs::write(
+            dir.join("lucid-p-1.jsonl"),
+            format!("{}\n{}\n", record("ev1"), record("ev2")),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("lucid-p-2.jsonl"),
+            format!("{}\n{}\n", record("ev2"), record("ev3")),
+        )
+        .unwrap();
+        std::fs::write(dir.join(".lucid-pull-p.json"), r#"{"last_to":null}"#).unwrap();
+        let harness = crate::config::HarnessConfig {
+            name: "lucid".into(),
+            log_path: dir.clone(),
+            log_format: crate::config::LogFormat::LucidSession,
+            bound_filter: None,
+        };
+        let (entries, report) = LogAggregator::new()
+            .aggregate_with_report(std::slice::from_ref(&harness))
+            .await
+            .unwrap();
+        let mut ids: Vec<&str> = entries.iter().map(|e| e.id.as_str()).collect();
+        ids.sort();
+        assert_eq!(ids, ["ev1", "ev2", "ev3"]);
+        assert_eq!(report.files_seen, 2, "the pull state file is not a log");
+        assert_eq!(report.files_failed, 0);
+        assert!(report.harnesses[0].warnings[0].contains("1 Lucid event"));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn codex_sqlite_preserves_multiline_feedback_rows() {
